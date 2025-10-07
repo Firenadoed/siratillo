@@ -6,7 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
-// Type
+// Types
 type Order = {
   id: number;  
   name: string;
@@ -17,6 +17,11 @@ type Order = {
   amount: string;
   status: string;
   date?: string;
+};
+
+type PendingOrder = {
+  id: number;
+  name: string;
 };
 
 export default function EmployeePage() {
@@ -46,7 +51,7 @@ export default function EmployeePage() {
     },
   ]);
 
-  const [pendingOrders, setPendingOrders] = useState([
+  const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([
     { id: 2, name: "Mia Santos" },
     { id: 3, name: "Jordan Cruz" },
     { id: 4, name: "Sophia Ramirez" },
@@ -79,14 +84,14 @@ export default function EmployeePage() {
 
   // Modal state
   const [showModal, setShowModal] = useState(false);
-  const [currentOrder, setCurrentOrder] = useState<any>(null);
+  const [currentOrder, setCurrentOrder] = useState<PendingOrder | null>(null);
   const [weight, setWeight] = useState("");
 
   // Formula for computing amount (₱30/kg)
   const computeAmount = (kilo: number) => `₱${kilo * 30}`;
 
   // Confirm pending order → open modal
-  const handleConfirm = (order: any) => {
+  const handleConfirm = (order: PendingOrder) => {
     setCurrentOrder(order);
     setShowModal(true);
   };
@@ -287,11 +292,11 @@ export default function EmployeePage() {
       </div>
 
       {/* Modal */}
-      {showModal && (
+      {showModal && currentOrder && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
           <div className="bg-white p-6 rounded shadow-lg w-96">
             <h3 className="text-lg font-semibold mb-4">
-              Enter weight for {currentOrder?.name}
+              Enter weight for {currentOrder.name}
             </h3>
             <Input
               type="number"
@@ -301,13 +306,13 @@ export default function EmployeePage() {
               className="mb-4"
             />
             <div className="flex justify-end gap-2">
-              <Button
-                variant="outline"
-                onClick={() => setShowModal(false)}
-              >
+              <Button variant="outline" onClick={() => setShowModal(false)}>
                 Cancel
               </Button>
-              <Button onClick={handleSaveWeight} className="bg-blue-500 text-white">
+              <Button
+                onClick={handleSaveWeight}
+                className="bg-blue-500 text-white"
+              >
                 Save
               </Button>
             </div>
