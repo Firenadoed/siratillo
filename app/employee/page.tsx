@@ -25,7 +25,6 @@ export default function EmployeePage() {
   const session = useSession();
   const router = useRouter();
 
-  const [orders, setOrders] = useState<Order[]>([]);
   const [pendingOrders, setPendingOrders] = useState<Order[]>([]);
   const [ongoingOrders, setOngoingOrders] = useState<Order[]>([]);
   const [orderHistory, setOrderHistory] = useState<Order[]>([]);
@@ -79,7 +78,6 @@ export default function EmployeePage() {
       );
       const history = data.filter((o) => o.status === "done");
 
-      setOrders(data);
       setPendingOrders(pending);
       setOngoingOrders(ongoing);
       setOrderHistory(history);

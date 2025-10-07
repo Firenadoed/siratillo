@@ -8,6 +8,13 @@ import { Home, Shirt, Users, LogOut, Menu, X } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useSupabaseClient, useUser } from "@supabase/auth-helpers-react"
 
+interface Shop {
+  id: string
+  name: string
+  address: string
+  owner_id: string
+}
+
 const sidebarLinks = [
   { name: "Dashboard", href: "/owner", icon: Home },
   { name: "Services", href: "/services", icon: Shirt },
@@ -20,7 +27,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const supabase = useSupabaseClient()
   const user = useUser()
 
-  const [shop, setShop] = useState<any>(null)
+  const [shop, setShop] = useState<Shop | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   useEffect(() => {
@@ -34,11 +41,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
       if (error) {
         console.error("❌ Error fetching shop:", error.message)
-      } else if (!data || data.length === 0) {
-        console.warn("⚠️ No shop found for this owner")
-      } else {
+        return
+      }
+
+      if (data && data.length > 0) {
         console.log(`🏪 Shop found: ${data[0].name} (${data[0].id})`)
-        setShop(data[0])
+        setShop(data[0] as Shop)
+      } else {
+        console.warn("⚠️ No shop found for this owner")
       }
     }
 
@@ -96,6 +106,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <nav className="flex flex-col gap-2 px-4 relative">
             {sidebarLinks.map((link) => {
               const active = pathname === link.href
+              const Icon = link.icon
               return (
                 <div key={link.name} className="relative">
                   {active && (
@@ -115,7 +126,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                         : "text-blue-100 hover:bg-blue-600/40 hover:text-white"
                     )}
                   >
-                    <link.icon className="w-5 h-5" />
+                    <Icon className="w-5 h-5" />
                     {link.name}
                   </Link>
                 </div>
