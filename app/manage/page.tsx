@@ -1,6 +1,8 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
+import { useSupabaseClient, useSession } from "@supabase/auth-helpers-react"
+import { useRouter } from "next/navigation"
 import DashboardLayout from "@/components/dashboard-layout"
 import {
   Dialog,
@@ -11,7 +13,6 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Table } from "@/components/ui/table"
 import {
   Card,
   CardHeader,
@@ -20,94 +21,142 @@ import {
 } from "@/components/ui/card"
 
 type Account = {
-  id: number
+  id: string
   name: string
+  email: string
   password: string
-  role: "Laundryman" | "Deliveryman"
+  role: "employee" | "deliveryman"
 }
 
 export default function ManageAccounts() {
-  // Initial data
-  const [laundrymen, setLaundrymen] = useState<Account[]>([
-    { id: 1, name: "Kiko Gutierrez", password: "12345", role: "Laundryman" },
-    { id: 2, name: "Rian Garcia", password: "12345", role: "Laundryman" },
-  ])
-  const [deliverymen, setDeliverymen] = useState<Account[]>([
-    { id: 3, name: "David John", password: "12345", role: "Deliveryman" },
-    { id: 4, name: "Mary Grace", password: "12345", role: "Deliveryman" },
-  ])
+  const supabase = useSupabaseClient()
+  const session = useSession()
+  const router = useRouter()
 
-  // Modal states
+  const [employees, setEmployees] = useState<Account[]>([])
+  const [deliverymen, setDeliverymen] = useState<Account[]>([])
+  const [shopId, setShopId] = useState<string | null>(null)
+
   const [openAdd, setOpenAdd] = useState(false)
   const [openEdit, setOpenEdit] = useState(false)
   const [openDelete, setOpenDelete] = useState(false)
-
-  // Selected
   const [selected, setSelected] = useState<Account | null>(null)
   const [newName, setNewName] = useState("")
+  const [newEmail, setNewEmail] = useState("")
   const [newPassword, setNewPassword] = useState("")
-  const [newRole, setNewRole] = useState<"Laundryman" | "Deliveryman">("Laundryman")
-
-  // Search
-  const [searchLaundry, setSearchLaundry] = useState("")
+  const [newRole, setNewRole] = useState<"employee" | "deliveryman">("employee")
+  const [searchEmployee, setSearchEmployee] = useState("")
   const [searchDelivery, setSearchDelivery] = useState("")
 
-  // Add
-  const handleAdd = () => {
-    const newAccount = {
-      id: Date.now(),
-      name: newName,
-      password: newPassword,
-      role: newRole,
+  useEffect(() => {
+    if (session === null) {
+      router.push("/login")
     }
-    if (newRole === "Laundryman") {
-      setLaundrymen([...laundrymen, newAccount])
-    } else {
-      setDeliverymen([...deliverymen, newAccount])
+  }, [session, router])
+
+  useEffect(() => {
+    const fetchOwnerShop = async () => {
+      if (!session) return
+
+      const { data: shop, error: shopError } = await supabase
+        .from("shops")
+        .select("id, name")
+        .eq("owner_id", session.user.id)
+        .maybeSingle()
+
+      if (shopError || !shop) {
+        alert("No shop found for this owner.")
+        return
+      }
+
+      setShopId(shop.id)
+      fetchAccounts(shop.id)
     }
-    setNewName("")
-    setNewPassword("")
-    setNewRole("Laundryman")
+
+    fetchOwnerShop()
+  }, [session, supabase])
+
+  const fetchAccounts = async (shop_id: string) => {
+    const { data, error } = await supabase
+      .from("users")
+      .select("id, name, email, password, role")
+      .eq("shop_id", shop_id)
+      .in("role", ["employee", "deliveryman"])
+
+    if (!error && data) {
+      setEmployees(data.filter((u) => u.role === "employee"))
+      setDeliverymen(data.filter((u) => u.role === "deliveryman"))
+    }
+  }
+
+  const handleAdd = async () => {
+    if (!shopId) return alert("No shop found for this owner.")
+    if (!newEmail || !newPassword || !newName) {
+      alert("Please fill in all fields.")
+      return
+    }
+
+    const res = await fetch("/api/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: newEmail,
+        password: newPassword,
+        name: newName,
+        role: newRole,
+        shop_id: shopId,
+      }),
+    })
+
+    if (!res.ok) {
+      const err = await res.json()
+      alert(`Error: ${err.message}`)
+      return
+    }
+
     setOpenAdd(false)
+    setNewName("")
+    setNewEmail("")
+    setNewPassword("")
+    fetchAccounts(shopId)
   }
 
-  // Edit
-  const handleEdit = () => {
-    if (!selected) return
-    if (selected.role === "Laundryman") {
-      setLaundrymen(
-        laundrymen.map((acc) =>
-          acc.id === selected.id ? { ...acc, name: newName, password: newPassword } : acc
-        )
-      )
+  const handleEdit = async () => {
+    if (!selected || !shopId) return
+
+    const { error } = await supabase
+      .from("users")
+      .update({
+        name: newName,
+        password: newPassword,
+      })
+      .eq("id", selected.id)
+
+    if (error) {
+      alert("Failed to update account.")
     } else {
-      setDeliverymen(
-        deliverymen.map((acc) =>
-          acc.id === selected.id ? { ...acc, name: newName, password: newPassword } : acc
-        )
-      )
+      setOpenEdit(false)
+      setSelected(null)
+      fetchAccounts(shopId)
     }
-    setOpenEdit(false)
-    setSelected(null)
   }
 
-  // Delete
-  const handleDelete = () => {
-    if (!selected) return
-    if (selected.role === "Laundryman") {
-      setLaundrymen(laundrymen.filter((acc) => acc.id !== selected.id))
-    } else {
-      setDeliverymen(deliverymen.filter((acc) => acc.id !== selected.id))
+  const handleDelete = async () => {
+    if (!selected || !shopId) return
+
+    const { error } = await supabase.from("users").delete().eq("id", selected.id)
+    if (error) alert("Failed to delete account.")
+    else {
+      setOpenDelete(false)
+      setSelected(null)
+      fetchAccounts(shopId)
     }
-    setOpenDelete(false)
-    setSelected(null)
   }
 
-  // Render reusable table inside card
   const renderCardTable = (
     title: string,
     data: Account[],
-    role: "Laundryman" | "Deliveryman",
+    role: "employee" | "deliveryman",
     search: string,
     setSearch: (val: string) => void
   ) => {
@@ -117,75 +166,82 @@ export default function ManageAccounts() {
 
     return (
       <Card className="mb-8">
-        <CardHeader className="flex flex-row justify-between items-center">
-          <CardTitle>{title}</CardTitle>
-          <div className="flex space-x-2">
+        <CardHeader className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
+          <CardTitle className="text-xl font-semibold">{title}</CardTitle>
+          <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
             <Input
               placeholder="Search by name..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-60"
+              className="flex-1 sm:w-60"
             />
             <Button
               onClick={() => {
                 setNewRole(role)
                 setOpenAdd(true)
               }}
+              className="w-full sm:w-auto"
             >
-              + Add {role}
+              + Add {role === "employee" ? "Employee" : "Deliveryman"}
             </Button>
           </div>
         </CardHeader>
         <CardContent>
-          <Table className="w-full table-fixed">
-            <thead>
-              <tr>
-                <th className="text-left p-2 w-1/3">Name</th>
-                <th className="text-left p-2 w-1/3">Password</th>
-                <th className="text-left p-2 w-1/3">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredData.length > 0 ? (
-                filteredData.map((acc) => (
-                  <tr key={acc.id} className="border-t">
-                    <td className="p-2">{acc.name}</td>
-                    <td className="p-2">••••••</td>
-                    <td className="p-2 space-x-2">
-                      <Button
-                        size="sm"
-                        onClick={() => {
-                          setSelected(acc)
-                          setNewName(acc.name)
-                          setNewPassword(acc.password)
-                          setNewRole(acc.role)
-                          setOpenEdit(true)
-                        }}
-                      >
-                        Edit
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={() => {
-                          setSelected(acc)
-                          setOpenDelete(true)
-                        }}
-                      >
-                        Delete
-                      </Button>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[600px] border-collapse">
+              <thead>
+                <tr className="bg-gray-100 text-left">
+                  <th className="p-2 w-1/4">Name</th>
+                  <th className="p-2 w-1/4">Email</th>
+                  <th className="p-2 w-1/4">Password</th>
+                  <th className="p-2 w-1/4 text-center">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredData.length > 0 ? (
+                  filteredData.map((acc) => (
+                    <tr key={acc.id} className="border-t hover:bg-gray-50">
+                      <td className="p-2">{acc.name}</td>
+                      <td className="p-2">{acc.email}</td>
+                      <td className="p-2">••••••</td>
+                      <td className="p-2 flex justify-center gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setSelected(acc)
+                            setNewName(acc.name)
+                            setNewEmail(acc.email)
+                            setNewPassword(acc.password)
+                            setNewRole(acc.role)
+                            setOpenEdit(true)
+                          }}
+                        >
+                          Edit
+                        </Button>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => {
+                            setSelected(acc)
+                            setOpenDelete(true)
+                          }}
+                        >
+                          Delete
+                        </Button>
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={4} className="text-center p-4 text-gray-500">
+                      No results found
                     </td>
                   </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={3} className="text-center p-4 text-gray-500">
-                    No results found
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </Table>
+                )}
+              </tbody>
+            </table>
+          </div>
         </CardContent>
       </Card>
     )
@@ -193,71 +249,64 @@ export default function ManageAccounts() {
 
   return (
     <DashboardLayout>
-      <h1 className="text-2xl font-bold mb-6">Manage Accounts</h1>
+      <div className="p-4 sm:p-6 space-y-8">
+        <h1 className="text-2xl font-bold">Manage Accounts</h1>
+        {renderCardTable("Employee Accounts", employees, "employee", searchEmployee, setSearchEmployee)}
+        {renderCardTable("Deliveryman Accounts", deliverymen, "deliveryman", searchDelivery, setSearchDelivery)}
 
-      {renderCardTable("Laundryman Accounts", laundrymen, "Laundryman", searchLaundry, setSearchLaundry)}
-      {renderCardTable("Deliveryman Accounts", deliverymen, "Deliveryman", searchDelivery, setSearchDelivery)}
+        {/* Add Modal */}
+        <Dialog open={openAdd} onOpenChange={setOpenAdd}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Add {newRole}</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3">
+              <Input placeholder={`Enter ${newRole} name`} value={newName} onChange={(e) => setNewName(e.target.value)} />
+              <Input placeholder="Enter email" type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} />
+              <Input placeholder="Enter password" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
+            </div>
+            <DialogFooter>
+              <Button onClick={handleAdd} className="w-full sm:w-auto">
+                Save
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
-      {/* Add Modal */}
-      <Dialog open={openAdd} onOpenChange={setOpenAdd}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Add {newRole}</DialogTitle>
-          </DialogHeader>
-          <Input
-            placeholder={`Enter ${newRole} name`}
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-          />
-          <Input
-            placeholder="Enter password"
-            type="password"
-            value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
-          />
-          <DialogFooter>
-            <Button onClick={handleAdd}>Save</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        {/* Edit Modal */}
+        <Dialog open={openEdit} onOpenChange={setOpenEdit}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Edit {newRole}</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3">
+              <Input placeholder="Enter name" value={newName} onChange={(e) => setNewName(e.target.value)} />
+              <Input placeholder="Enter email" type="email" value={newEmail} disabled />
+              <Input placeholder="Enter password" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
+            </div>
+            <DialogFooter>
+              <Button onClick={handleEdit} className="w-full sm:w-auto">
+                Update
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
-      {/* Edit Modal */}
-      <Dialog open={openEdit} onOpenChange={setOpenEdit}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Edit {newRole}</DialogTitle>
-          </DialogHeader>
-          <Input
-            placeholder="Enter name"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-          />
-          <Input
-            placeholder="Enter password"
-            type="password"
-            value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
-          />
-          <DialogFooter>
-            <Button onClick={handleEdit}>Update</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Delete Modal */}
-      <Dialog open={openDelete} onOpenChange={setOpenDelete}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete {selected?.role}</DialogTitle>
-          </DialogHeader>
-          <p>Are you sure you want to delete {selected?.name}?</p>
-          <DialogFooter>
-            <Button variant="destructive" onClick={handleDelete}>
-              Delete
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        {/* Delete Modal */}
+        <Dialog open={openDelete} onOpenChange={setOpenDelete}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Delete {selected?.role}</DialogTitle>
+            </DialogHeader>
+            <p>Are you sure you want to delete <b>{selected?.name}</b>?</p>
+            <DialogFooter>
+              <Button variant="destructive" onClick={handleDelete} className="w-full sm:w-auto">
+                Delete
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
     </DashboardLayout>
   )
 }
