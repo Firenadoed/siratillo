@@ -55,7 +55,7 @@ export default function LoginPage() {
 
     const role = userData?.role;
 
-    if (role === "superadmin") router.push("/superadmin");
+    if (role === "superadmin") router.push("/admin");
     else if (role === "owner") router.push("/owner");
     else if (role === "employee") router.push("/employee");
     else alert("Unknown role. Please contact support.");
