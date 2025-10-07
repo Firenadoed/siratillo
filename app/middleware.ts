@@ -4,27 +4,16 @@ import type { NextRequest } from "next/server"
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
 
-  // ✅ Allow public assets & routes
-  if (
-    pathname.startsWith("/_next") ||
-    pathname.startsWith("/api") ||
-    pathname.startsWith("/icons") ||
-    pathname === "/manifest.json" ||
-    pathname === "/favicon.ico" ||
-    pathname.startsWith("/login") ||
-    pathname.startsWith("/register")
-  ) {
-    return NextResponse.next()
-  }
-
-  // 👇 Redirect the root path to /login
+  // Redirect root path to /login
   if (pathname === "/") {
     return NextResponse.redirect(new URL("/login", req.url))
   }
 
+  // You can add auth logic here later if needed
   return NextResponse.next()
 }
 
 export const config = {
-  matcher: ["/((?!_next|api|.*\\..*).*)"], // applies to all routes except static
+  // Only match actual pages, not static assets
+  matcher: ["/((?!_next|api|icons|manifest\\.json|favicon\\.ico|login|register|.*\\..*).*)"],
 }
