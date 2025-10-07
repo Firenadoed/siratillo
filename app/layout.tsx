@@ -1,7 +1,6 @@
 import "./globals.css";
 import { Geist, Geist_Mono } from "next/font/google";
 import SupabaseProvider from "@/components/supabase-provider";
-import Head from "next/head";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -16,6 +15,7 @@ const geistMono = Geist_Mono({
 export const metadata = {
   title: "LaundryGo",
   description: "Smart laundry management system",
+  themeColor: "#7c3aed", // for theme-color meta
 };
 
 export default function RootLayout({
@@ -25,12 +25,12 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <Head>
+      <head>
         {/* PWA Manifest */}
         <link rel="manifest" href="/manifest.json" />
         <meta name="theme-color" content="#7c3aed" />
         <link rel="icon" href="/icons/icon.png" />
-      </Head>
+      </head>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         <SupabaseProvider>{children}</SupabaseProvider>
       </body>
