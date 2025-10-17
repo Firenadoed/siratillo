@@ -6,11 +6,3 @@ const nextConfig: NextConfig = {
   swcMinify: true,
 };
 
-export default withPWA({
-  ...nextConfig,
-  pwa: {
-    dest: "public",       // Service worker goes into public/
-    register: true,       // Auto-register SW
-    skipWaiting: true,    // Activate new SW immediately
-  },
-});

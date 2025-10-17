@@ -8,6 +8,12 @@ import Image from "next/image";
 import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
 
+type RoleRow = {
+  roles: {
+    name: string;
+  };
+};
+
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -16,6 +22,7 @@ export default function LoginPage() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    // Step 1: Authenticate user with Supabase Auth
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
@@ -33,37 +40,36 @@ export default function LoginPage() {
       return;
     }
 
-    const { data: sessionData, error: sessionError } =
-      await supabase.auth.getSession();
+    console.log("✅ Authenticated:", user.email);
 
-    if (sessionError) {
-      console.error("Error fetching session:", sessionError);
-    } else if (sessionData?.session) {
-      console.log("✅ Logged in successfully!");
-    }
+    // Step 2: Fetch user's role via join
+    const { data: roleData, error: roleError } = await supabase
+      .from("user_roles")
+      .select("roles(name)")
+      .eq("user_id", user.id)
+      .returns<RoleRow[]>(); // ✅ fix type inference
 
-    const { data: userData, error: userError } = await supabase
-      .from("users")
-      .select("role")
-      .eq("id", user.id)
-      .single();
-
-    if (userError) {
-      alert("Error fetching user role: " + userError.message);
+    if (roleError) {
+      alert("Error fetching user role: " + roleError.message);
+      console.error("Role fetch error:", roleError);
       return;
     }
 
-    const role = userData?.role;
+    const role = roleData?.[0]?.roles?.name;
+    console.log("🧩 User role:", role);
 
+    // Step 3: Redirect user based on role
     if (role === "superadmin") router.push("/admin");
     else if (role === "owner") router.push("/owner");
     else if (role === "employee") router.push("/employee");
+    else if (role === "delivery") router.push("/delivery");
+    else if (role === "customer") router.push("/customer");
     else alert("Unknown role. Please contact support.");
   };
 
   return (
     <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-blue-100 via-white to-blue-50 px-4">
-      <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md sm:max-w-sm md:max-w-md lg:max-w-lg text-center border border-gray-100">
+      <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md sm:max-w-sm md:max-w-md lg:max-w-lg text-center border border-gray-100">
         {/* Logo */}
         <div className="flex justify-center mb-2">
           <Image
@@ -102,7 +108,7 @@ export default function LoginPage() {
             </label>
             <Input
               type="password"
-              placeholder="••••••••"
+              placeholder="Password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
