@@ -1,7 +1,7 @@
 "use client";
 
 import DashboardLayout from "@/components/dashboard-layout";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { Card, CardHeader, CardTitle, CardContent } from "@/lib/ui/card";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   PieChart, Pie, Cell,
@@ -9,9 +9,10 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { useEffect, useMemo, useState } from "react";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { useSupabaseClient, useSession } from "@supabase/auth-helpers-react";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/lib/ui/tabs";
 import { useRouter } from "next/navigation";
+import { Toaster, toast } from "sonner";
+import { useBranch } from "@/lib/branchcontext";
 
 const COLORS = ["#0088FE", "#00C49F", "#FFBB28"];
 
@@ -21,14 +22,11 @@ const weekdayShort = (d: Date): string => d.toLocaleDateString("en-US", { weekda
 
 interface Order {
   id: string;
-  service_id: string | null;
   customer_name: string;
   method: string;
   amount: number;
   created_at: string;
   status: string | null;
-  detergent: string | null;
-  kilo: number | null;
 }
 
 interface Shop {
@@ -36,65 +34,97 @@ interface Shop {
   name: string;
 }
 
-export default function Dashboard() {
-  const supabase = useSupabaseClient();
-  const session = useSession();
+function DashboardContent() { // 👈 RENAME this component
   const router = useRouter();
+  const { selectedBranch, branchChangeTrigger } = useBranch();
 
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [shopName, setShopName] = useState<string | null>(null);
+  const [isAuthorized, setIsAuthorized] = useState(false);
 
-  // redirect if not logged in
+  // ==============================
+  // 🔐 AUTHENTICATION CHECK FIRST
+  // ==============================
   useEffect(() => {
-    if (session === null) router.push("/login");
-  }, [session, router]);
+    const checkAuth = async () => {
+      try {
+        console.log("🔄 Checking owner authentication...")
+        
+        const response = await fetch('/api/owner/check-auth');
+        const { authorized, error, user } = await response.json();
+        
+        console.log('Owner auth check result:', { authorized, error, user });
+        
+        if (!response.ok || !authorized) {
+          toast.error(error || "Owner access required");
+          router.replace("/login");
+          return;
+        }
 
-  // fetch shop + orders
+        console.log("✅ Owner authenticated, fetching data...")
+        setIsAuthorized(true);
+        
+      } catch (error) {
+        console.error("Auth check error:", error);
+        toast.error("Authentication failed");
+        router.replace("/login");
+      }
+    };
+
+    checkAuth();
+  }, [router]);
+
+  // ==============================
+  // 📊 FETCH DATA ONLY WHEN AUTHORIZED + BRANCH CHANGES
+  // ==============================
   useEffect(() => {
-    if (!session?.user?.id) return;
+    if (!isAuthorized || !selectedBranch) return;
 
     const fetchData = async () => {
-      setLoading(true);
+      try {
+        setLoading(true);
+        console.log("📡 Fetching owner dashboard data for branch:", selectedBranch.id)
 
-      const { data: shop } = await supabase
-        .from("shops")
-        .select("id, name")
-        .eq("owner_id", session.user.id)
-        .maybeSingle<Shop>();
+        const response = await fetch(`/api/owner/dashboard-data?branch_id=${selectedBranch.id}`);
+        const { shop, orders, error } = await response.json();
+        
+        if (error) throw new Error(error);
+        
+        if (shop) {
+          setShopName(shop.name);
+          console.log("🏪 Shop found:", shop.name)
+        } else {
+          console.log("❌ No shop found for this owner")
+        }
+        
+        const parsedOrders = (orders || []).map((o: any) => ({
+          id: o.id,
+          customer_name: o.customer_name,
+          method: o.method,
+          amount: Number(o.amount) || 0,
+          created_at: o.created_at,
+          status: o.status,
+          items: o.items || []
+        })) as Order[];
 
-      if (!shop?.id) {
+        setOrders(parsedOrders);
+        console.log("📦 Orders loaded:", parsedOrders.length)
+        
+      } catch (error: any) {
+        console.error("Error fetching data:", error);
+        toast.error("Failed to load dashboard data: " + error.message);
+      } finally {
         setLoading(false);
-        return;
       }
-
-      setShopName(shop.name);
-
-      const start = new Date();
-      start.setDate(start.getDate() - 365);
-
-      const { data: ordersData, error } = await supabase
-        .from("orders")
-        .select("id, service_id, customer_name, method, amount, created_at, status, detergent, kilo")
-        .eq("shop_id", shop.id)
-        .gte("created_at", start.toISOString())
-        .order("created_at", { ascending: true });
-
-      if (error) console.error("Error fetching orders:", error);
-
-      const parsed = (ordersData || []).map((o) => ({
-        ...o,
-        amount: Number(o.amount) || 0,
-      })) as Order[];
-
-      setOrders(parsed);
-      setLoading(false);
     };
 
     fetchData();
-  }, [session, supabase]);
+  }, [isAuthorized, selectedBranch, branchChangeTrigger]);
 
-  // --- ANALYTICS CALCULATIONS ---
+  // ==============================
+  // 📈 ANALYTICS CALCULATIONS
+  // ==============================
   const {
     totalSales,
     ordersToday,
@@ -113,6 +143,8 @@ export default function Dashboard() {
         weeklyCustomerGrowth: [],
       };
     }
+
+    console.log("📊 Calculating analytics for", orders.length, "orders")
 
     const now = new Date();
     const todayKey = toDayKey(now);
@@ -197,19 +229,63 @@ export default function Dashboard() {
     };
   }, [orders]);
 
-  if (loading) {
+  // ==============================
+  // 🎯 RENDER LOGIC
+  // ==============================
+  
+  // Show loading while checking auth OR fetching data
+  if (loading || !isAuthorized) {
     return (
-      <DashboardLayout>
-        <p className="p-6 text-center text-gray-600">Loading dashboard…</p>
-      </DashboardLayout>
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">
+            {!isAuthorized ? "Checking permissions..." : "Loading dashboard..."}
+          </p>
+        </div>
+      </div>
     );
   }
 
+  // Show branch selection prompt if no branch selected
+  if (!selectedBranch) {
+    return (
+      <div className="text-center py-12">
+        <p className="text-gray-500 text-lg">Please select a branch to view analytics</p>
+        <p className="text-gray-400 mt-2">Use the branch selector in the sidebar</p>
+      </div>
+    );
+  }
+
+  // Show empty state if no data
+  if (orders.length === 0) {
+    return (
+      <>
+        <h1 className="text-xl sm:text-2xl font-bold mb-6 text-gray-800">
+          {shopName ? `${shopName} — ` : ""}Analytics
+        </h1>
+        <div className="text-center py-12">
+          <p className="text-gray-500 text-lg">No orders found for {selectedBranch.name}</p>
+          <p className="text-gray-400 mt-2">Start accepting orders to see analytics</p>
+        </div>
+      </>
+    );
+  }
+
+  // Show dashboard with data
   return (
-    <DashboardLayout>
+    <>
+      <Toaster position="top-right" richColors />
       <h1 className="text-xl sm:text-2xl font-bold mb-6 text-gray-800">
         {shopName ? `${shopName} — ` : ""}Analytics
       </h1>
+
+      {/* Branch Info */}
+      <div className="mb-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
+        <p className="text-blue-700 font-medium">
+          Viewing data for: <span className="font-bold">{selectedBranch.name}</span>
+        </p>
+      </div>
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6 mb-6">
@@ -257,7 +333,7 @@ export default function Dashboard() {
           </div>
         </TabsContent>
       </Tabs>
-    </DashboardLayout>
+    </>
   );
 }
 
@@ -312,5 +388,14 @@ function BarChartComp({ data }: { data: { name: string; new: number; returning: 
         <Bar dataKey="returning" stackId="a" fill="#8884d8" />
       </BarChart>
     </ResponsiveContainer>
+  );
+}
+
+// 👈 MAIN EXPORT - WRAP DashboardContent with DashboardLayout
+export default function Dashboard() {
+  return (
+    <DashboardLayout>
+      <DashboardContent />
+    </DashboardLayout>
   );
 }
