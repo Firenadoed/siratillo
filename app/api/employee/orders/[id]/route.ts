@@ -5,10 +5,10 @@ import { createClient } from '@supabase/supabase-js';
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const orderId = params.id;
+    const { id: orderId } = await params;
     const supabase = createRouteHandlerClient({ cookies });
     
     // Get current session
