@@ -17,7 +17,7 @@ import {
   Settings,
   QrCode 
 } from "lucide-react"
-import { useEffect, useState, createContext, useContext } from "react" // 👈 ADD createContext, useContext
+import { useEffect, useState, createContext, useContext } from "react"
 import { useUser } from "@supabase/auth-helpers-react"
 import { Toaster, toast } from "sonner"
 import { BranchContext, useBranch, type Branch } from "@/lib/branchcontext"
@@ -27,6 +27,17 @@ interface Shop {
   name: string
   description: string
   owner_id: string
+  logo_url: string | null
+  cover_image_url: string | null
+}
+
+interface OperatingHours {
+  id: string
+  branch_id: string
+  day_of_week: number
+  open_time: string
+  close_time: string
+  is_closed: boolean
 }
 
 const sidebarLinks = [
@@ -43,13 +54,69 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const [shop, setShop] = useState<Shop | null>(null)
   const [branches, setBranches] = useState<Branch[]>([])
+  const [operatingHours, setOperatingHours] = useState<OperatingHours[]>([])
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [isAuthorized, setIsAuthorized] = useState(false)
   const [branchesDropdownOpen, setBranchesDropdownOpen] = useState(false)
   const [selectedBranch, setSelectedBranch] = useState<Branch | null>(null)
   const [branchChangeTrigger, setBranchChangeTrigger] = useState(0)
+  const [isOpenNow, setIsOpenNow] = useState(false)
 
+  // ==============================
+  // 🕒 CHECK IF BRANCH IS OPEN NOW
+  // ==============================
+ const checkIfOpen = (branchId: string, hours: OperatingHours[]): boolean => {
+  const now = new Date();
+  const currentDay = now.getDay(); // 0 = Sunday, 1 = Monday, etc.
+  const currentTime = now.toTimeString().slice(0, 8); // "HH:MM:SS" format
+  
+  console.log('🕒 Checking if open for branch:', branchId);
+  console.log('📅 Current day:', currentDay, '(0=Sunday)');
+  console.log('⏰ Current time:', currentTime);
+  console.log('📋 All operating hours for this branch:', 
+    hours.filter(h => h.branch_id === branchId)
+  );
+  
+  const todayHours = hours.find(h => 
+    h.branch_id === branchId && h.day_of_week === currentDay
+  );
+  
+  if (!todayHours) {
+    console.log('❌ No operating hours found for today');
+    console.log('Available days for this branch:', 
+      hours.filter(h => h.branch_id === branchId).map(h => ({
+        day: h.day_of_week,
+        open: h.open_time,
+        close: h.close_time,
+        closed: h.is_closed
+      }))
+    );
+    return false;
+  }
+  
+  if (todayHours.is_closed) {
+    console.log('❌ Marked as closed for today');
+    return false;
+  }
+  
+  // Convert TIME fields to comparable strings
+  // PostgreSQL TIME format is "HH:MM:SS" or "HH:MM:SS.sss"
+  const openTimeStr = todayHours.open_time?.slice(0, 5) || '00:00'; // Take only HH:MM
+  const closeTimeStr = todayHours.close_time?.slice(0, 5) || '23:59'; // Take only HH:MM
+  const currentTimeStr = currentTime.slice(0, 5); // Take only HH:MM
+  
+  const isOpen = currentTimeStr >= openTimeStr && currentTimeStr <= closeTimeStr;
+  
+  console.log('✅ Hours found:', {
+    openTime: openTimeStr,
+    closeTime: closeTimeStr,
+    currentTime: currentTimeStr,
+    isOpen
+  });
+  
+  return isOpen;
+}
   // ==============================
   // 🔐 AUTHENTICATION CHECK FIRST
   // ==============================
@@ -94,7 +161,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         console.log("📡 Fetching shop data via API...")
 
         const response = await fetch('/api/owner/shop-data')
-        const { shop, branches, error } = await response.json()
+        const { shop, branches, operatingHours, error } = await response.json()
 
         if (!response.ok || error) {
           console.error("❌ Error fetching shop data:", error)
@@ -106,9 +173,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           console.log(`🏪 Shop found: ${shop.name}`)
           setShop(shop)
           setBranches(branches || [])
+          setOperatingHours(operatingHours || [])
+          
           // Set first branch as selected by default
           if (branches && branches.length > 0) {
-            setSelectedBranch(branches[0])
+            const firstBranch = branches[0]
+            setSelectedBranch(firstBranch)
+            // Check if branch is open
+            setIsOpenNow(checkIfOpen(firstBranch.id, operatingHours || []))
           }
         } else {
           console.warn("⚠️ No shop found for this owner")
@@ -132,8 +204,31 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     setSelectedBranch(branch)
     setBranchesDropdownOpen(false)
     setBranchChangeTrigger(prev => prev + 1)
-    console.log(`📍 Branch switched to: ${branch.name}`)
+    
+    // Check if selected branch is open
+    setIsOpenNow(checkIfOpen(branch.id, operatingHours))
+    
+    console.log(`📍 Branch switched to: ${branch.name}, Open: ${isOpenNow}`)
   }
+
+  // ==============================
+  // 🕒 UPDATE OPEN STATUS EVERY MINUTE
+  // ==============================
+  useEffect(() => {
+    if (!selectedBranch) return;
+
+    const updateOpenStatus = () => {
+      setIsOpenNow(checkIfOpen(selectedBranch.id, operatingHours))
+    };
+
+    // Update immediately
+    updateOpenStatus();
+
+    // Update every minute
+    const interval = setInterval(updateOpenStatus, 60000);
+
+    return () => clearInterval(interval);
+  }, [selectedBranch, operatingHours]);
 
   const handleLogout = async () => {
     try {
@@ -196,8 +291,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             {/* Shop Header Section */}
             <div className="p-6 border-b border-blue-600">
               <div className="flex items-center gap-4 mb-4">
-                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white shadow-lg">
-                  <Building className="w-7 h-7" />
+                {/* Shop Logo - Uses shop.logo_url */}
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white shadow-lg overflow-hidden">
+                  {shop?.logo_url ? (
+                    <img 
+                      src={shop.logo_url} 
+                      alt={shop.name}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <Building className="w-7 h-7" />
+                  )}
                 </div>
                 <div className="flex-1 min-w-0">
                   <h1 className="font-bold text-white text-xl leading-tight truncate">
@@ -268,15 +372,23 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                         </button>
                       ))}
                     </div>
-                     </div>
+                  </div>
                 )}
               </div>
 
-              {/* Status Badge */}
+              {/* Status Badge - Dynamic based on operating hours */}
               <div className="flex items-center justify-between mt-4">
                 <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                  <span className="text-emerald-300 font-medium text-sm">Open Now</span>
+                  <div className={cn(
+                    "w-2 h-2 rounded-full animate-pulse",
+                    isOpenNow ? "bg-emerald-400" : "bg-red-400"
+                  )} />
+                  <span className={cn(
+                    "font-medium text-sm",
+                    isOpenNow ? "text-emerald-300" : "text-red-300"
+                  )}>
+                    {isOpenNow ? "Open Now" : "Closed"}
+                  </span>
                 </div>
                 <span className="text-blue-300 text-xs">
                   {branches.length} branch{branches.length !== 1 ? 'es' : ''}
@@ -337,12 +449,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           {/* Footer Section */}
           <div className="p-4 border-t border-blue-600">
             <div className="space-y-2">
-              <button className="w-full flex items-center gap-3 p-3 text-blue-200 hover:text-white hover:bg-blue-700/30 rounded-xl transition-all duration-200">
+              <Link 
+                href="/owner/settings"
+                className="w-full flex items-center gap-3 p-3 text-blue-200 hover:text-white hover:bg-blue-700/30 rounded-xl transition-all duration-200"
+              >
                 <div className="p-2 rounded-lg bg-blue-700/50">
                   <Settings className="w-4 h-4" />
                 </div>
                 <span className="font-medium text-sm">Settings</span>
-              </button>
+              </Link>
               
               <button
                 onClick={handleLogout}
@@ -373,8 +488,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <div className="mb-6 p-4 bg-white/80 backdrop-blur-sm rounded-2xl border border-blue-200 shadow-sm">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center text-white shadow-lg">
-                      <MapPin className="w-5 h-5" />
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center text-white shadow-lg overflow-hidden">
+                      {shop?.logo_url ? (
+                        <img 
+                          src={shop.logo_url} 
+                          alt={shop.name}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <MapPin className="w-5 h-5" />
+                      )}
                     </div>
                     <div>
                       <h2 className="font-bold text-slate-800 text-lg">
@@ -386,14 +509,22 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                    <span className="text-emerald-600 font-medium text-sm">Active</span>
+                    <div className={cn(
+                      "w-2 h-2 rounded-full animate-pulse",
+                      isOpenNow ? "bg-emerald-400" : "bg-red-400"
+                    )} />
+                    <span className={cn(
+                      "font-medium text-sm",
+                      isOpenNow ? "text-emerald-600" : "text-red-600"
+                    )}>
+                      {isOpenNow ? "Open Now" : "Closed"}
+                    </span>
                   </div>
                 </div>
               </div>
             )}
 
-            {/* Main Content - SIMPLIFIED */}
+            {/* Main Content */}
             <div className="rounded-2xl border border-blue-200 bg-white/90 backdrop-blur-sm shadow-sm hover:shadow-md transition-all duration-300">
               {children}
             </div>

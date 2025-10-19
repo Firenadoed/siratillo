@@ -3,7 +3,7 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { supabaseServer } from '@/lib/supabaseServer'
 import { NextResponse } from 'next/server'
 
-// Define proper TypeScript interfaces (same as check-auth)
+// Define proper TypeScript interfaces
 interface Role {
   name: string;
 }
@@ -11,7 +11,7 @@ interface Role {
 interface UserRole {
   user_id: string;
   role_id: string;
-  roles: Role; // ← Object, not array!
+  roles: Role;
 }
 
 export async function GET() {
@@ -19,7 +19,6 @@ export async function GET() {
     // Use the same server client for session check as in login
     const supabaseAuth = await supabaseServer()
     
-    // ✅ FIXED: Use getUser() instead of getSession() for security
     const { data: { user }, error: userError } = await supabaseAuth.auth.getUser()
     
     if (userError) {
@@ -60,7 +59,6 @@ export async function GET() {
       return NextResponse.json({ error: "No role assigned. Please contact support." }, { status: 403 })
     }
 
-    // CORRECTED: roles is an object, not array
     const hasOwnerRole = roleData.some(role => role.roles?.name === 'owner')
     console.log("🎭 Shop-data hasOwnerRole:", hasOwnerRole)
 
@@ -74,7 +72,7 @@ export async function GET() {
     // Get shop data
     const { data: shop, error: shopError } = await supabaseAdmin
       .from('shops')
-      .select('id, name, description, owner_id')
+      .select('id, name, description, owner_id, logo_url, cover_image_url')
       .eq('owner_id', user.id)
       .single()
 
@@ -83,6 +81,7 @@ export async function GET() {
       return NextResponse.json({ 
         shop: null, 
         branches: [], 
+        operatingHours: [],
         error: "No shop found for this owner" 
       })
     }
@@ -92,7 +91,7 @@ export async function GET() {
     // Get branches
     const { data: branches, error: branchesError } = await supabaseAdmin
       .from('shop_branches')
-      .select('id, name, address, shop_id')
+      .select('id, name, address, shop_id, is_active')
       .eq('shop_id', shop.id)
       .eq('is_active', true)
       .order('created_at', { ascending: true })
@@ -103,9 +102,30 @@ export async function GET() {
 
     console.log("📍 Found branches:", branches?.length || 0)
 
+    // ✅ FIX: GET OPERATING HOURS FOR ALL BRANCHES
+    let operatingHours: any[] = []
+    
+    if (branches && branches.length > 0) {
+      const branchIds = branches.map(branch => branch.id)
+      
+      const { data: hoursData, error: hoursError } = await supabaseAdmin
+        .from('branch_operating_hours')
+        .select('*')
+        .in('branch_id', branchIds)
+
+      if (hoursError) {
+        console.error("Operating hours fetch error:", hoursError)
+      } else {
+        operatingHours = hoursData || []
+        console.log("🕒 Found operating hours:", operatingHours.length)
+        console.log("📊 Operating hours sample:", operatingHours.slice(0, 2))
+      }
+    }
+
     return NextResponse.json({
       shop,
       branches: branches || [],
+      operatingHours: operatingHours, // ✅ Now includes operating hours
       error: null
     })
 
