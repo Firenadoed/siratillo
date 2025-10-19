@@ -13,11 +13,13 @@ interface ShopBranch {
 interface Shop {
   id: string;
   owner_id: string;
+  name: string;
 }
 
 interface ShopUserAssignment {
-  shop_branches: ShopBranch;
-  shops: Shop;
+  role_in_shop: string;
+  shop_id: string;
+  shops: Shop[];
 }
 
 export async function POST(request: NextRequest) {
@@ -110,7 +112,7 @@ export async function POST(request: NextRequest) {
         ownedShops: userShops?.length,
         shops: userShops?.map(s => ({
           shop_id: s.shop_id,
-          shop_name: s.shops?.name,
+          shop_name: s.shops?.[0]?.name, // Access first element of array
           role: s.role_in_shop
         }))
       });
