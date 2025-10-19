@@ -11,6 +11,7 @@ const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
 });
+
 export default function RootLayout({
   children,
 }: {
@@ -21,7 +22,25 @@ export default function RootLayout({
       <head>
         {/* PWA Manifest */}
         <meta name="theme-color" content="#7c3aed" />
-        <link rel="icon" href="/icons/icon.png" />
+        
+        {/* Favicon */}
+        <link rel="icon" href="/favicon.ico" />
+        <link rel="shortcut icon" href="/favicon.ico" />
+        
+        {/* Apple Touch Icon */}
+        <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+        
+        {/* PNG Icons */}
+        <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+        <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+        
+        {/* Optional: Web App Manifest for PWA */}
+        <link rel="manifest" href="/site.webmanifest" />
+        
+        {/* Optional: Microsoft Tiles */}
+        <meta name="msapplication-TileColor" content="#7c3aed" />
+        <meta name="msapplication-config" content="/browserconfig.xml" />
+        <meta name="theme-color" content="#7c3aed" />
       </head>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         <SupabaseProvider>{children}</SupabaseProvider>

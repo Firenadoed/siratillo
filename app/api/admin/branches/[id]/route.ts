@@ -5,10 +5,10 @@ import type { NextRequest } from 'next/server'
 // PUT /api/admin/branches/[id]
 export async function PUT(
   request: NextRequest,
-  context: { params: { id: string } }
+  { params }: { params: { id: string } }
 ) {
   try {
-    const { id } = context.params
+    const { id } = params
     const { name, address, latitude, longitude } = await request.json()
 
     if (!name?.trim() || !address?.trim()) {
@@ -51,10 +51,10 @@ export async function PUT(
 // DELETE /api/admin/branches/[id]
 export async function DELETE(
   request: NextRequest,
-  context: { params: { id: string } }
+  { params }: { params: { id: string } }
 ) {
   try {
-    const { id } = context.params
+    const { id } = params
 
     const { error } = await supabaseAdmin.from('shop_branches').delete().eq('id', id)
 
