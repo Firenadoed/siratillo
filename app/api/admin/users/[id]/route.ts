@@ -2,95 +2,89 @@
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { NextResponse } from 'next/server'
 
+interface RouteParams {
+  params: Promise<{ id: string }>
+}
+
 export async function DELETE(
   request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: RouteParams
 ) {
   try {
-    const { id } = await params;
-    
+    const resolvedParams = await params;
+    const { id } = resolvedParams;
+
+    // Validate ID
+    if (!id || typeof id !== 'string' || id.length === 0) {
+      return NextResponse.json(
+        { error: "Invalid user ID" },
+        { status: 400 }
+      );
+    }
+
     console.log('=== DELETE USER DEBUG ===');
-    console.log('User ID received:', id);
-    console.log('ID type:', typeof id);
-    console.log('ID length:', id.length);
+    console.log('User ID:', id);
 
-    // Test the service role connection first
+    // Test service role connection
     console.log('Testing service role connection...');
-    const { data: testData, error: testError } = await supabaseAdmin.auth.getUser();
+    const { error: testError } = await supabaseAdmin.auth.getUser();
     if (testError) {
-      console.log('Service role connection test FAILED:', testError);
-    } else {
-      console.log('Service role connection test PASSED');
+      console.error('Service role connection FAILED:', testError);
+      return NextResponse.json(
+        { error: "Service authentication failed" },
+        { status: 500 }
+      );
+    }
+    console.log('Service role connection test PASSED');
+
+    // Verify user exists before deletion
+    console.log('Verifying user exists...');
+    const { data: userData, error: userError } = await supabaseAdmin.auth.admin.getUserById(id);
+    
+    if (userError || !userData) {
+      console.log('User not found:', userError?.message);
+      
+      // Additional check: search in user list
+      const { data: allUsers } = await supabaseAdmin.auth.admin.listUsers();
+      const userExists = allUsers?.users?.some(u => u.id === id);
+      
+      if (!userExists) {
+        return NextResponse.json(
+          { error: "User not found" },
+          { status: 404 }
+        );
+      }
     }
 
-    // Try to get the user
-    console.log('Attempting to get user by ID...');
-    const { data: user, error: userError } = await supabaseAdmin.auth.admin.getUserById(id);
-    
-    if (userError) {
-      console.log('getUserById ERROR:', {
-        message: userError.message,
-        status: userError.status,
-        name: userError.name,
-        stack: userError.stack
-      });
-      
-      // Try alternative: list all users and find this one
-      console.log('Attempting to list all users...');
-      const { data: allUsers, error: listError } = await supabaseAdmin.auth.admin.listUsers();
-      
-      if (listError) {
-        console.log('listUsers ERROR:', listError);
-      } else {
-        console.log(`Found ${allUsers?.users?.length || 0} total users`);
-        const foundUser = allUsers?.users?.find(u => u.id === id);
-        console.log('User found in list:', !!foundUser);
-        if (foundUser) {
-          console.log('Found user details:', {
-            id: foundUser.id,
-            email: foundUser.email,
-            created_at: foundUser.created_at
-          });
-        }
-      }
-      
-      return NextResponse.json({ 
-        error: "User not found",
-        details: userError.message 
-      }, { status: 404 });
-    }
-    
-    if (!user) {
-      console.log('User object is null');
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
-    }
-    
-    console.log('User found:', {
-      id: user.user.id,
-      email: user.user.email,
-      created_at: user.user.created_at
+    console.log('User verified:', {
+      id: userData?.user?.id,
+      email: userData?.user?.email
     });
 
-    // Try to delete the user
-    console.log('Attempting to delete user...');
+    // Delete user
+    console.log('Deleting user...');
     const { error: deleteError } = await supabaseAdmin.auth.admin.deleteUser(id);
 
     if (deleteError) {
-      console.log('deleteUser ERROR:', {
-        message: deleteError.message,
-        status: deleteError.status,
-        name: deleteError.name
-      });
+      console.error('Delete failed:', deleteError);
       throw deleteError;
     }
-    
+
     console.log('User deleted successfully');
-    return NextResponse.json({ success: true });
-    
-  } catch (error: any) {
-    console.error('FINAL CATCH ERROR:', error);
     return NextResponse.json({ 
-      error: error.message || "Unknown error occurred" 
-    }, { status: 500 });
+      success: true,
+      message: "User deleted successfully"
+    });
+
+  } catch (error: any) {
+    console.error('Delete user error:', error);
+    
+    return NextResponse.json(
+      { 
+        error: error.message || "Failed to delete user",
+        details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      },
+      { status: 500 }
+    );
   }
 }

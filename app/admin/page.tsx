@@ -148,7 +148,6 @@ export default function ManageShops() {
   // ==============================
   const handleLogout = async () => {
     try {
-      // You'll need to create a logout API route or keep client-side logout
       const response = await fetch('/api/auth/logout', { method: 'POST' });
       if (response.ok) {
         router.replace('/login');
@@ -274,10 +273,33 @@ export default function ManageShops() {
     
     try {
       if (editingOwner) {
-        // For editing, you might need to create an update owner API
-        toast.error("Owner editing not implemented yet");
-        return;
+        // EDIT EXISTING OWNER
+        if (!newOwnerShop) return toast.error("Please select a shop");
+        
+        const response = await fetch(`/api/admin/owners/${editingOwner.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            full_name: newOwnerName,
+            email: newOwnerEmail,
+            shop_id: newOwnerShop
+          })
+        });
+        
+        const { success, error, owner } = await response.json();
+        
+        if (error) throw new Error(error);
+        
+        setOpenAddOwner(false);
+        setNewOwnerName("");
+        setNewOwnerEmail("");
+        setNewOwnerPassword("");
+        setNewOwnerShop("");
+        setEditingOwner(null);
+        fetchOwners();
+        toast.success("Owner updated successfully");
       } else {
+        // ADD NEW OWNER
         if (!newOwnerPassword.trim()) return toast.error("Password required for new owner");
         if (!newOwnerShop) return toast.error("Please select a shop");
         
@@ -329,11 +351,37 @@ export default function ManageShops() {
     }
   };
 
+  // Reset form states when dialogs close
+  const resetShopForm = () => {
+    setNewShopName("");
+    setNewShopAddress("");
+    setEditingShop(null);
+  };
+
+  const resetBranchForm = () => {
+    setBranchName("");
+    setBranchAddress("");
+    setBranchLocation([9.308, 123.308]);
+    setEditingBranch(null);
+    setOpenAddBranch({ open: false, shopId: null });
+  };
+
+  const resetOwnerForm = () => {
+    setNewOwnerName("");
+    setNewOwnerEmail("");
+    setNewOwnerPassword("");
+    setNewOwnerShop("");
+    setEditingOwner(null);
+  };
+
   // ==============================
   // Filtered lists
   // ==============================
   const filteredShops = shops.filter(s => s.name.toLowerCase().includes(searchShop.toLowerCase()));
-  const filteredOwners = owners.filter(o => o.full_name.toLowerCase().includes(searchOwner.toLowerCase()));
+  const filteredOwners = owners.filter(o => 
+    o.full_name.toLowerCase().includes(searchOwner.toLowerCase()) ||
+    o.email.toLowerCase().includes(searchOwner.toLowerCase())
+  );
 
   if (loading) {
     return (
@@ -356,9 +404,6 @@ export default function ManageShops() {
     );
   }
 
-  // ==============================
-  // JSX Render (Mostly unchanged)
-  // ==============================
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-6 md:space-y-8">
       <Toaster position="top-right" richColors />
@@ -381,9 +426,7 @@ export default function ManageShops() {
             <Button 
               className="w-full sm:w-auto" 
               onClick={() => { 
-                setEditingShop(null); 
-                setNewShopName(""); 
-                setNewShopAddress(""); 
+                resetShopForm();
                 setOpenAddShop(true); 
               }}
             >
@@ -402,41 +445,45 @@ export default function ManageShops() {
                   {shop.description && (
                     <p className="text-sm text-gray-600 mt-1">{shop.description}</p>
                   )}
-                  {shop.branches.map((b) => (
-                    <div key={b.id} className="mt-2 border p-2 rounded-md flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 flex-wrap">
-                      <span className="truncate">{b.name} ({b.address})</span>
-                      <div className="flex flex-wrap gap-1 mt-1 sm:mt-0">
-                        <Button 
-                          size="sm" 
-                          onClick={() => { 
-                            setEditingBranch(b); 
-                            setBranchName(b.name); 
-                            setBranchAddress(b.address); 
-                            setBranchLocation([b.lat!, b.lng!]); 
-                            setOpenAddBranch({ open: true, shopId: shop.id }); 
-                          }}
-                        >
-                          Edit
-                        </Button>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button size="sm" variant="destructive">Delete</Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>Delete Branch?</AlertDialogTitle>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
-                              <AlertDialogAction onClick={() => { setDeleteBranchId(b.id); handleDeleteBranch(); }}>
-                                Delete
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
+                  {shop.branches && shop.branches.length > 0 ? (
+                    shop.branches.map((b) => (
+                      <div key={b.id} className="mt-2 border p-2 rounded-md flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 flex-wrap">
+                        <span className="truncate">{b.name} ({b.address})</span>
+                        <div className="flex flex-wrap gap-1 mt-1 sm:mt-0">
+                          <Button 
+                            size="sm" 
+                            onClick={() => { 
+                              setEditingBranch(b); 
+                              setBranchName(b.name); 
+                              setBranchAddress(b.address); 
+                              setBranchLocation([b.lat || 9.308, b.lng || 123.308]); 
+                              setOpenAddBranch({ open: true, shopId: shop.id }); 
+                            }}
+                          >
+                            Edit
+                          </Button>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button size="sm" variant="destructive">Delete</Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Delete Branch?</AlertDialogTitle>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => { setDeleteBranchId(b.id); handleDeleteBranch(); }}>
+                                  Delete
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))
+                  ) : (
+                    <p className="text-sm text-gray-500 mt-2">No branches</p>
+                  )}
                 </div>
                 <div className="flex flex-wrap gap-1 mt-2 sm:mt-0">
                   <Button 
@@ -493,11 +540,7 @@ export default function ManageShops() {
             <Button 
               className="w-full sm:w-auto" 
               onClick={() => { 
-                setEditingOwner(null); 
-                setNewOwnerName(""); 
-                setNewOwnerEmail(""); 
-                setNewOwnerPassword(""); 
-                setNewOwnerShop(""); 
+                resetOwnerForm();
                 setOpenAddOwner(true); 
               }}
             >
@@ -516,7 +559,7 @@ export default function ManageShops() {
                   <div className="flex-1 min-w-0">
                     <p className="font-semibold truncate">{owner.full_name}</p>
                     <p className="text-sm text-gray-600 truncate">{owner.email}</p>
-                    <p className="text-sm text-gray-600 truncate">{shop?.name || "—"}</p>
+                    <p className="text-sm text-gray-600 truncate">Shop: {shop?.name || "Not assigned"}</p>
                   </div>
                   <div className="flex flex-wrap gap-1 mt-2 sm:mt-0">
                     <Button 
@@ -556,7 +599,10 @@ export default function ManageShops() {
       </Card>
 
       {/* =================== Shop Dialog =================== */}
-      <Dialog open={openAddShop} onOpenChange={setOpenAddShop}>
+      <Dialog open={openAddShop} onOpenChange={(open) => {
+        if (!open) resetShopForm();
+        setOpenAddShop(open);
+      }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{editingShop ? "Edit Shop" : "Add Shop"}</DialogTitle>
@@ -575,14 +621,17 @@ export default function ManageShops() {
           />
           <DialogFooter>
             <Button onClick={handleSaveShop}>
-              {editingShop ? "Update" : "Add"}
+              {editingShop ? "Update Shop" : "Add Shop"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* =================== Branch Dialog =================== */}
-      <Dialog open={openAddBranch.open} onOpenChange={(o) => setOpenAddBranch({ ...openAddBranch, open: o })}>
+      <Dialog open={openAddBranch.open} onOpenChange={(open) => {
+        if (!open) resetBranchForm();
+        else setOpenAddBranch({ ...openAddBranch, open });
+      }}>
         <DialogContent className="max-w-3xl">
           <DialogHeader>
             <DialogTitle>{editingBranch ? "Edit Branch" : "Add Branch"}</DialogTitle>
@@ -602,14 +651,17 @@ export default function ManageShops() {
           <BranchMap location={branchLocation} setLocation={setBranchLocation} />
           <DialogFooter>
             <Button onClick={handleSaveBranch}>
-              {editingBranch ? "Update" : "Add"}
+              {editingBranch ? "Update Branch" : "Add Branch"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* =================== Owner Dialog =================== */}
-      <Dialog open={openAddOwner} onOpenChange={setOpenAddOwner}>
+      <Dialog open={openAddOwner} onOpenChange={(open) => {
+        if (!open) resetOwnerForm();
+        setOpenAddOwner(open);
+      }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{editingOwner ? "Edit Owner" : "Add Owner"}</DialogTitle>
@@ -626,6 +678,7 @@ export default function ManageShops() {
             onChange={(e) => setNewOwnerEmail(e.target.value)} 
             className="mb-2" 
           />
+          {/* Only show password field when adding new owner */}
           {!editingOwner && (
             <Input 
               placeholder="Password" 
@@ -649,7 +702,7 @@ export default function ManageShops() {
           </Select>
           <DialogFooter>
             <Button onClick={handleSaveOwner}>
-              {editingOwner ? "Update" : "Add"}
+              {editingOwner ? "Update Owner" : "Add Owner"}
             </Button>
           </DialogFooter>
         </DialogContent>
