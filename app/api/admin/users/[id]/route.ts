@@ -3,6 +3,13 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
+// Define type for Supabase user
+interface SupabaseUser {
+  id: string;
+  email?: string;
+  // Add other user properties as needed
+}
+
 export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -42,7 +49,9 @@ export async function DELETE(
       
       // Additional check: search in user list
       const { data: allUsers } = await supabaseAdmin.auth.admin.listUsers();
-      const userExists = allUsers?.users?.some(u => u.id === id);
+      
+      // Type-safe user existence check
+      const userExists = allUsers?.users?.some((u: SupabaseUser) => u.id === id);
       
       if (!userExists) {
         return NextResponse.json(
