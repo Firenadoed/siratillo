@@ -14,7 +14,7 @@ import {
   DialogTrigger,
 } from "@/lib/ui/dialog"
 import { Input } from "@/lib/ui/input"
-import { Package, Truck, ShoppingBag, WashingMachine, Droplets, Sparkles } from "lucide-react"
+import { Package, Truck, ShoppingBag, Droplets, Sparkles } from "lucide-react"
 import { Toaster, toast } from "sonner";
 import { useBranch } from "@/lib/branchcontext"
 
@@ -49,7 +49,6 @@ type LaundryMethods = {
   dropoff_enabled: boolean
   delivery_enabled: boolean
   pickup_enabled: boolean
-  self_service_enabled: boolean
 }
 
 // Create a separate component that uses the hook
@@ -59,8 +58,7 @@ function ServicesContent() {
   const [methods, setMethods] = useState<LaundryMethods>({
     dropoff_enabled: false,
     delivery_enabled: false,
-    pickup_enabled: false,
-    self_service_enabled: false
+    pickup_enabled: false
   })
   const [services, setServices] = useState<Service[]>([])
   const [detergents, setDetergents] = useState<Detergent[]>([])
@@ -448,7 +446,7 @@ function ServicesContent() {
         <h2 className="text-xl md:text-2xl font-bold mb-4 text-center md:text-left">
           Service Methods
         </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {[
             {
               label: "Drop Off",
@@ -467,12 +465,6 @@ function ServicesContent() {
               icon: ShoppingBag,
               state: methods.pickup_enabled,
               field: "pickup_enabled",
-            },
-            {
-              label: "Self Service",
-              icon: WashingMachine,
-              state: methods.self_service_enabled,
-              field: "self_service_enabled",
             },
           ].map(({ label, icon: Icon, state, field }) => (
             <Card
@@ -752,7 +744,7 @@ function ServicesContent() {
 
         {services.length === 0 ? (
           <div className="text-center py-12 border-2 border-dashed rounded-lg">
-            <WashingMachine className="mx-auto h-12 w-12 text-gray-400" />
+            <ShoppingBag className="mx-auto h-12 w-12 text-gray-400" />
             <h3 className="mt-4 text-lg font-medium text-gray-900">No services</h3>
             <p className="mt-2 text-sm text-gray-500">
               Get started by creating your first laundry service for {currentBranchName}.

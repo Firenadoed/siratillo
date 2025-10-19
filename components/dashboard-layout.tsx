@@ -14,7 +14,8 @@ import {
   MapPin, 
   ChevronDown,
   Building,
-  Settings
+  Settings,
+  QrCode 
 } from "lucide-react"
 import { useEffect, useState, createContext, useContext } from "react" // 👈 ADD createContext, useContext
 import { useUser } from "@supabase/auth-helpers-react"
@@ -32,6 +33,7 @@ const sidebarLinks = [
   { name: "Dashboard", href: "/owner", icon: Home },
   { name: "Services", href: "/owner/services", icon: Shirt },
   { name: "Manage Accounts", href: "/owner/manage", icon: Users },
+  { name: "QR Codes", href: "/owner/qr-codes", icon: QrCode },
 ]
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {

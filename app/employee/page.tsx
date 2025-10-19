@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/lib/ui/card";
 import { Button } from "@/lib/ui/button";
 import { Input } from "@/lib/ui/input";
 import { Toaster, toast } from "sonner";
-import { ChevronDown, ChevronUp, Clock, CheckCircle, Truck, AlertCircle, LogOut } from "lucide-react";
+import { ChevronDown, ChevronUp, Clock, CheckCircle, Truck, AlertCircle, LogOut, MapPin, User } from "lucide-react";
 
 // Types
 type Order = {
@@ -462,10 +462,10 @@ function EmployeeContent() {
   // Show loading while checking auth OR fetching data
   if (loading || !isAuthorized) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-blue-50">
+      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-blue-50 to-sky-100">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-700 font-medium">
+          <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-700 font-medium">
             {!isAuthorized ? "Checking permissions..." : "Loading employee portal..."}
           </p>
         </div>
@@ -476,7 +476,7 @@ function EmployeeContent() {
   // Show empty state if no shop assigned
   if (!currentShopId) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-blue-50">
+      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-blue-50 to-sky-100">
         <div className="text-center p-8 bg-white rounded-2xl shadow-lg border-2 border-blue-200">
           <p className="text-gray-700 text-lg font-semibold">No shop assignment found</p>
           <p className="text-gray-500 mt-2">Please contact administrator</p>
@@ -489,29 +489,43 @@ function EmployeeContent() {
   }
 
   return (
-    <div className="min-h-screen bg-blue-50 p-4 md:p-6">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-sky-100 p-3 sm:p-4 md:p-6">
       <Toaster position="top-right" richColors />
       
-      {/* Header */}
-      <div className="max-w-7xl mx-auto space-y-6">
-        <Card className="bg-white border-2 border-blue-300 shadow-lg">
-          <CardContent className="p-6">
-            <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-              <div className="text-center md:text-left">
-                <h1 className="text-2xl md:text-3xl font-bold text-gray-900">
-                  {shopName} - Employee Portal
-                </h1>
-                <p className="text-gray-600 mt-2">
-                  Welcome, {session?.user?.email}
-                </p>
-                <p className="text-blue-700 font-medium mt-2">
-                  📍 {branchName} • {branchAddress}
-                </p>
+      {/* Modern Header */}
+      <div className="max-w-7xl mx-auto mb-6">
+        <Card className="bg-gradient-to-r from-blue-600 to-sky-600 border-0 shadow-xl">
+          <CardContent className="p-4 sm:p-6">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+              <div className="flex-1">
+                {/* Shop and Branch Info */}
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="bg-white/20 p-2 rounded-lg">
+                    <MapPin className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
+                  </div>
+                  <div>
+                    <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-white">
+                      {shopName}
+                    </h1>
+                    <p className="text-blue-100 text-sm sm:text-base">
+                      {branchName} • {branchAddress}
+                    </p>
+                  </div>
+                </div>
+                
+                {/* Welcome Message */}
+                <div className="flex items-center gap-2 bg-white/10 p-3 rounded-lg">
+                  <User className="h-4 w-4 text-white" />
+                  <p className="text-white text-sm sm:text-base">
+                    Welcome, <span className="font-semibold">{session?.user?.email?.split('@')[0]}</span>
+                  </p>
+                </div>
               </div>
+              
+              {/* Logout Button */}
               <Button
                 onClick={handleLogout}
-                variant="outline"
-                className="border-red-300 text-red-600 hover:bg-red-50 font-semibold"
+                className="bg-white text-blue-600 hover:bg-blue-50 font-semibold px-4 py-2 text-sm sm:text-base"
               >
                 <LogOut className="h-4 w-4 mr-2" />
                 Logout
@@ -519,134 +533,144 @@ function EmployeeContent() {
             </div>
           </CardContent>
         </Card>
+      </div>
 
-        {/* Main Content Area */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* Main Content Area */}
+      <div className="max-w-7xl mx-auto">
+        <div className="grid grid-cols-1 xl:grid-cols-4 gap-4 sm:gap-6">
           
           {/* Priority Column - Always show pending */}
-          <section className="lg:col-span-1">
-            <div className="flex items-center gap-3 mb-4 p-4 bg-yellow-100 border-2 border-yellow-300 rounded-xl">
-              <div className="flex items-center justify-center w-10 h-10 bg-yellow-500 rounded-full">
-                <Clock className="h-5 w-5 text-white" />
-              </div>
-              <div>
-                <h2 className="text-xl font-bold text-gray-900">
-                  Action Required
-                </h2>
-                <p className="text-yellow-700 font-medium">
-                  {pendingOrders.length} order{pendingOrders.length !== 1 ? 's' : ''} waiting
-                </p>
-              </div>
-            </div>
-            
-            {pendingOrders.length === 0 ? (
-              <Card className="bg-green-50 border-2 border-green-300">
-                <CardContent className="p-6 text-center">
-                  <CheckCircle className="h-12 w-12 text-green-500 mx-auto mb-2" />
-                  <p className="text-gray-700 font-medium">No pending orders</p>
-                  <p className="text-sm text-gray-500">All clear! Ready for new orders</p>
-                </CardContent>
-              </Card>
-            ) : (
-              <div className="space-y-3">
-                {pendingOrders.map(order => (
-                  <CompactOrderCard 
-                    key={order.id} 
-                    order={order}
-                    action={
-                      <Button 
-                        size="sm" 
-                        onClick={() => handleConfirm(order)}
-                        className="bg-blue-600 hover:bg-blue-700 text-white font-semibold"
-                      >
-                        Confirm
-                      </Button>
-                    }
-                  />
-                ))}
-              </div>
-            )}
+          <section className="xl:col-span-1">
+            <Card className="bg-white border-2 border-yellow-300 shadow-lg">
+              <CardHeader className="bg-yellow-100 border-b-2 border-yellow-300">
+                <CardTitle className="flex items-center gap-3">
+                  <div className="bg-yellow-500 p-2 rounded-lg">
+                    <Clock className="h-5 w-5 text-white" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg sm:text-xl font-bold text-gray-900">
+                      Action Required
+                    </h2>
+                    <p className="text-yellow-700 text-sm font-medium">
+                      {pendingOrders.length} order{pendingOrders.length !== 1 ? 's' : ''} waiting
+                    </p>
+                  </div>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-4">
+                {pendingOrders.length === 0 ? (
+                  <div className="text-center py-6">
+                    <CheckCircle className="h-12 w-12 text-green-500 mx-auto mb-2" />
+                    <p className="text-gray-700 font-medium">No pending orders</p>
+                    <p className="text-sm text-gray-500">All clear! Ready for new orders</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3 max-h-[500px] overflow-y-auto">
+                    {pendingOrders.map(order => (
+                      <CompactOrderCard 
+                        key={order.id} 
+                        order={order}
+                        action={
+                          <Button 
+                            size="sm" 
+                            onClick={() => handleConfirm(order)}
+                            className="bg-blue-600 hover:bg-blue-700 text-white font-semibold"
+                          >
+                            Confirm
+                          </Button>
+                        }
+                      />
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </section>
 
-          {/* Active Work Column */}
-          <section className="lg:col-span-2 bg-blue-1000" >
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4 p-4 bg-blue-100 border-2 border-blue-300 rounded-xl">
-              <div className="flex items-center gap-3">
-                <div className="flex items-center justify-center w-10 h-10 bg-blue-500 rounded-full">
-                  <Truck className="h-5 w-5 text-white" />
-                </div>
-                <div>
-                  <h2 className="text-xl font-bold text-gray-900">
-                    Active Orders
-                  </h2>
-                  <p className="text-blue-700 font-medium">
-                    {ongoingOrders.length} order{ongoingOrders.length !== 1 ? 's' : ''} in progress
-                  </p>
-                </div>
-              </div>
-              <Input 
-                placeholder="Search by customer name..." 
-                className="w-full md:w-64 bg-white border-blue-300 focus:border-blue-500"
-                value={searchOngoing}
-                onChange={(e) => setSearchOngoing(e.target.value)}
-              />
-            </div>
-            
-            {filteredOngoingOrders.length === 0 ? (
-              <Card className="bg-gray-50 border-2 border-gray-300">
-                <CardContent className="p-6 text-center">
-                  <Clock className="h-12 w-12 text-gray-400 mx-auto mb-2" />
-                  <p className="text-gray-700 font-medium">No active orders</p>
-                  <p className="text-sm text-gray-500">Orders will appear here once confirmed</p>
-                </CardContent>
-              </Card>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {filteredOngoingOrders.map(order => (
-                  <OrderCard 
-                    key={order.id}
-                    order={order}
-                    onStatusChange={handleStatusChange}
-                    showDetails={true}
+          {/* Active Work Column - Wider */}
+          <section className="xl:col-span-3">
+            <Card className="bg-white border-2 border-blue-300 shadow-lg h-full">
+              <CardHeader className="bg-blue-100 border-b-2 border-blue-300">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className="bg-blue-500 p-2 rounded-lg">
+                      <Truck className="h-5 w-5 text-white" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-lg sm:text-xl font-bold text-gray-900">
+                        Active Orders
+                      </CardTitle>
+                      <p className="text-blue-700 text-sm font-medium">
+                        {ongoingOrders.length} order{ongoingOrders.length !== 1 ? 's' : ''} in progress
+                      </p>
+                    </div>
+                  </div>
+                  <Input 
+                    placeholder="Search by customer name..." 
+                    className="w-full sm:w-64 bg-white border-blue-300 focus:border-blue-500"
+                    value={searchOngoing}
+                    onChange={(e) => setSearchOngoing(e.target.value)}
                   />
-                ))}
-              </div>
-            )}
+                </div>
+              </CardHeader>
+              <CardContent className="p-4">
+                {filteredOngoingOrders.length === 0 ? (
+                  <div className="text-center py-8">
+                    <Clock className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+                    <p className="text-gray-700 font-medium text-lg">No active orders</p>
+                    <p className="text-gray-500">Orders will appear here once confirmed</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                    {filteredOngoingOrders.map(order => (
+                      <OrderCard 
+                        key={order.id}
+                        order={order}
+                        onStatusChange={handleStatusChange}
+                        showDetails={true}
+                      />
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </section>
         </div>
 
         {/* Recent Completions - Collapsible */}
-        <CollapsibleSection 
-          title={`Recent Completions (${orderHistory.length})`}
-          defaultOpen={orderHistory.length > 0}
-        >
-          {orderHistory.length === 0 ? (
-            <div className="text-center py-6">
-              <CheckCircle className="h-8 w-8 text-gray-400 mx-auto mb-2" />
-              <p className="text-gray-600">No completed orders yet</p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {orderHistory.slice(0, 10).map(order => (
-                <div key={order.id} className="flex items-center justify-between p-4 bg-green-50 border-2 border-green-200 rounded-lg">
-                  <div>
-                    <p className="font-semibold text-gray-900">{order.customer_name}</p>
-                    <p className="text-sm text-gray-600">
-                      {order.services?.name} • {order.kilo ? `${order.kilo} kg` : 'Weight not set'} • 
-                      <span className="capitalize"> {order.method}</span>
-                    </p>
+        <div className="mt-4 sm:mt-6">
+          <CollapsibleSection 
+            title={`Recent Completions (${orderHistory.length})`}
+            defaultOpen={orderHistory.length > 0}
+          >
+            {orderHistory.length === 0 ? (
+              <div className="text-center py-6">
+                <CheckCircle className="h-8 w-8 text-gray-400 mx-auto mb-2" />
+                <p className="text-gray-600">No completed orders yet</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {orderHistory.slice(0, 10).map(order => (
+                  <div key={order.id} className="flex items-center justify-between p-4 bg-green-50 border-2 border-green-200 rounded-lg">
+                    <div>
+                      <p className="font-semibold text-gray-900">{order.customer_name}</p>
+                      <p className="text-sm text-gray-600">
+                        {order.services?.name} • {order.kilo ? `${order.kilo} kg` : 'Weight not set'} • 
+                        <span className="capitalize"> {order.method}</span>
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-bold text-blue-700">₱{(order.amount || 0).toFixed(2)}</p>
+                      <p className="text-xs text-gray-500">
+                        {order.created_at ? new Date(order.created_at).toLocaleDateString() : ''}
+                      </p>
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <p className="font-bold text-blue-700">₱{(order.amount || 0).toFixed(2)}</p>
-                    <p className="text-xs text-gray-500">
-                      {order.created_at ? new Date(order.created_at).toLocaleDateString() : ''}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </CollapsibleSection>
+                ))}
+              </div>
+            )}
+          </CollapsibleSection>
+        </div>
       </div>
 
       {/* Weight Input Modal */}
