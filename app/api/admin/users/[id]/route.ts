@@ -1,18 +1,14 @@
 // app/api/admin/users/[id]/route.ts
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { NextResponse } from 'next/server'
-
-interface RouteParams {
-  params: Promise<{ id: string }>
-}
+import type { NextRequest } from 'next/server'
 
 export async function DELETE(
   request: Request,
-  { params }: RouteParams
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const resolvedParams = await params;
-    const { id } = resolvedParams;
+    const { id } = await params;
 
     // Validate ID
     if (!id || typeof id !== 'string' || id.length === 0) {
@@ -41,7 +37,7 @@ export async function DELETE(
     console.log('Verifying user exists...');
     const { data: userData, error: userError } = await supabaseAdmin.auth.admin.getUserById(id);
     
-    if (userError || !userData) {
+    if (userError || !userData?.user) {
       console.log('User not found:', userError?.message);
       
       // Additional check: search in user list

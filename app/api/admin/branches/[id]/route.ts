@@ -2,12 +2,18 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
+// Define the expected params type
+interface RouteParams {
+  id: string
+}
+
 // PUT /api/admin/branches/[id]
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<RouteParams> }
 ) {
   try {
+    const params = await context.params
     const { id } = params
     const { name, address, latitude, longitude } = await request.json()
 
@@ -51,9 +57,10 @@ export async function PUT(
 // DELETE /api/admin/branches/[id]
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<RouteParams> }
 ) {
   try {
+    const params = await context.params
     const { id } = params
 
     const { error } = await supabaseAdmin.from('shop_branches').delete().eq('id', id)
