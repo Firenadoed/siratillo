@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useSupabaseClient, useSession } from "@supabase/auth-helpers-react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/lib/ui/card";
 import { Button } from "@/lib/ui/button";
@@ -9,33 +8,25 @@ import { Input } from "@/lib/ui/input";
 import { Toaster, toast } from "sonner";
 import { ChevronDown, ChevronUp, Clock, CheckCircle, Truck, AlertCircle, LogOut, MapPin, User } from "lucide-react";
 
-// Types
+// Updated Types
 type Order = {
   id: string;
+  order_item_id: string | null;
   customer_name: string;
   detergent: string | null;
+  softener: string | null;
   method: "pickup" | "dropoff" | "delivery";
+  method_label: string;
   kilo: number | null;
   amount: number | null;
   status: "pending" | "in_shop" | "delivering" | "done";
   created_at?: string;
-  services?: { name: string; price: number };
+  started_at?: string;
+  completed_at?: string;
+  services?: { id: string; name: string; price: number };
+  customer_contact?: string;
+  delivery_location?: string;
   shop_id: string;
-};
-
-type EmployeeAssignment = {
-  shop_id: string;
-  branch_id: string;
-  role_in_shop: string;
-  shop: {
-    name: string;
-    description?: string;
-  };
-  branch: {
-    name: string;
-    address: string;
-    is_active: boolean;
-  };
 };
 
 // Compact Order Card Component
@@ -77,7 +68,7 @@ function CompactOrderCard({
             </div>
             <div className="text-sm text-gray-600 space-y-1">
               <p>Service: {order.services?.name || "Standard"}</p>
-              <p>Method: <span className="capitalize">{order.method}</span></p>
+              <p>Method: <span className="capitalize">{order.method_label}</span></p>
               {order.kilo && <p>Weight: {order.kilo} kg</p>}
               {order.amount && (
                 <p className="font-medium text-blue-700">₱{order.amount.toFixed(2)}</p>
@@ -151,7 +142,7 @@ function OrderCard({
             </div>
             <div className="flex justify-between items-center py-2">
               <span className="text-gray-600 font-medium">Method:</span>
-              <span className="font-semibold text-gray-900 capitalize">{order.method}</span>
+              <span className="font-semibold text-gray-900 capitalize">{order.method_label}</span>
             </div>
             {order.detergent && (
               <div className="flex justify-between items-center py-2">
@@ -159,10 +150,28 @@ function OrderCard({
                 <span className="font-semibold text-gray-900">{order.detergent}</span>
               </div>
             )}
+            {order.softener && (
+              <div className="flex justify-between items-center py-2">
+                <span className="text-gray-600 font-medium">Softener:</span>
+                <span className="font-semibold text-gray-900">{order.softener}</span>
+              </div>
+            )}
             {order.kilo && (
               <div className="flex justify-between items-center py-2">
                 <span className="text-gray-600 font-medium">Weight:</span>
                 <span className="font-semibold text-gray-900">{order.kilo} kg</span>
+              </div>
+            )}
+            {order.customer_contact && (
+              <div className="flex justify-between items-center py-2">
+                <span className="text-gray-600 font-medium">Contact:</span>
+                <span className="font-semibold text-gray-900">{order.customer_contact}</span>
+              </div>
+            )}
+            {order.delivery_location && order.method === 'delivery' && (
+              <div className="flex justify-between items-start py-2">
+                <span className="text-gray-600 font-medium">Delivery:</span>
+                <span className="font-semibold text-gray-900 text-right">{order.delivery_location}</span>
               </div>
             )}
             {order.amount && (
@@ -217,8 +226,6 @@ function CollapsibleSection({
 }
 
 function EmployeeContent() {
-  const supabase = useSupabaseClient();
-  const session = useSession();
   const router = useRouter();
 
   const [orders, setOrders] = useState<Order[]>([]);
@@ -265,8 +272,8 @@ function EmployeeContent() {
           setShopName(assignment.shop.name);
           setBranchName(assignment.branch.name);
           setBranchAddress(assignment.branch.address);
-          setCurrentShopId(assignment.shop_id);
-          console.log("🏪 Set shop:", assignment.shop.name, "Branch:", assignment.branch.name);
+          setCurrentShopId(assignment.branch_id);
+          console.log("🏪 Set shop:", assignment.shop.name, "Branch:", assignment.branch.name, "Branch ID:", assignment.branch_id);
         } else {
           console.warn("⚠️ Authorized but no assignments found");
           toast.error("No shop assignments found");
@@ -288,23 +295,27 @@ function EmployeeContent() {
   // 📊 FETCH ORDERS WHEN AUTHORIZED
   // ==============================
   useEffect(() => {
-    if (!isAuthorized || !currentShopId || !session) {
+    if (!isAuthorized || !currentShopId) {
       console.log("Skipping order fetch - not ready:", { 
         isAuthorized, 
-        currentShopId, 
-        hasSession: !!session 
+        currentShopId
       });
       return;
     }
 
     const fetchOrders = async () => {
       try {
-        console.log("📦 Fetching orders for shop:", currentShopId);
-        const { data, error } = await supabase
-          .from("orders")
-          .select("*, services(name, price)")
-          .eq("shop_id", currentShopId)
-          .order("created_at", { ascending: false });
+        console.log("📦 Fetching orders for branch:", currentShopId);
+        
+        const response = await fetch(`/api/employee/orders?branch_id=${currentShopId}`, {
+          credentials: 'include'
+        });
+        
+        if (!response.ok) {
+          throw new Error(`API error: ${response.status}`);
+        }
+        
+        const { pendingOrders, ongoingOrders, orderHistory, error } = await response.json();
 
         if (error) {
           console.error("❌ Error fetching orders:", error);
@@ -312,38 +323,36 @@ function EmployeeContent() {
           return;
         }
 
-        console.log("✅ Orders fetched:", data?.length);
-        setOrders(data || []);
+        console.log("✅ Orders fetched:", { 
+          pending: pendingOrders?.length || 0, 
+          ongoing: ongoingOrders?.length || 0, 
+          history: orderHistory?.length || 0 
+        });
+        
+        // Combine for display
+        const allOrders = [
+          ...(pendingOrders || []),
+          ...(ongoingOrders || []), 
+          ...(orderHistory || [])
+        ];
+        setOrders(allOrders);
         
       } catch (error) {
         console.error("💥 Error in fetchOrders:", error);
-        toast.error("Error loading orders");
+        toast.error("Error loading orders: " + (error as Error).message);
       }
     };
 
     fetchOrders();
 
-    // Real-time subscription for order updates
-    const subscription = supabase
-      .channel('orders-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'orders',
-          filter: `shop_id=eq.${currentShopId}`
-        },
-        () => {
-          fetchOrders(); // Refetch when changes occur
-        }
-      )
-      .subscribe();
+    // Set up polling for real-time updates
+    const interval = setInterval(fetchOrders, 30000); // Refresh every 30 seconds
 
     return () => {
-      subscription.unsubscribe();
+      clearInterval(interval);
     };
-  }, [isAuthorized, currentShopId, session, supabase]);
+
+  }, [isAuthorized, currentShopId]);
 
   // ==============================
   // 📈 ORDER FILTERING & CALCULATIONS
@@ -377,8 +386,17 @@ function EmployeeContent() {
   // 🎯 ORDER MANAGEMENT FUNCTIONS
   // ==============================
   const handleLogout = async () => {
-    await supabase.auth.signOut();
-    router.push("/login");
+    try {
+      const response = await fetch('/api/auth/logout', { method: 'POST' });
+      if (response.ok) {
+        router.push("/login");
+      } else {
+        toast.error("Logout failed");
+      }
+    } catch (error) {
+      console.error("Logout error:", error);
+      toast.error("Logout failed");
+    }
   };
 
   const handleConfirm = (order: Order) => {
@@ -397,61 +415,147 @@ function EmployeeContent() {
 
     try {
       const pricePerKg = currentOrder.services?.price ?? 0;
-      const amount = kilo * pricePerKg;
-      const method = currentOrder.method;
-      const newStatus =
-        method === "pickup" ? "done" : 
-        method === "dropoff" ? "in_shop" : 
-        "delivering";
+      const serviceId = currentOrder.services?.id;
 
-      const { error } = await supabase
-        .from("orders")
-        .update({ kilo, amount, status: newStatus })
-        .eq("id", currentOrder.id);
-
-      if (error) {
-        console.error("Error updating order:", error);
-        toast.error("Failed to update order");
+      if (!serviceId) {
+        toast.error("Service information missing");
         return;
+      }
+
+      console.log("🔄 Moving order to work queue:", {
+        orderId: currentOrder.id,
+        weight: kilo,
+        serviceId,
+        pricePerKg
+      });
+
+      const response = await fetch('/api/employee/orders', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          orderId: currentOrder.id,
+          weight: kilo,
+          serviceId: serviceId,
+          pricePerKg: pricePerKg
+        }),
+      });
+
+      // Handle non-JSON responses
+      const responseText = await response.text();
+      let result;
+      try {
+        result = responseText ? JSON.parse(responseText) : {};
+      } catch (parseError) {
+        console.error('JSON parse error:', parseError);
+        throw new Error('Invalid server response');
+      }
+
+      if (!response.ok) {
+        console.error("Server error:", result);
+        throw new Error(result.error || `HTTP error! status: ${response.status}`);
+      }
+
+      if (!result.success) {
+        console.error("Business logic error:", result);
+        throw new Error(result.error || 'Failed to process order');
       }
 
       // Success - close modal and reset
       setShowModal(false);
       setWeight("");
       setCurrentOrder(null);
-      toast.success("Order confirmed successfully!");
+      toast.success(result.message || "Order moved to work queue!");
+      
+      // Refresh orders after a short delay
+      setTimeout(() => {
+        window.location.reload();
+      }, 1000);
       
     } catch (error) {
       console.error("Error saving weight:", error);
-      toast.error("An error occurred");
+      toast.error("An error occurred: " + (error as Error).message);
     }
   };
 
   const handleStatusChange = async (order: Order) => {
     try {
-      let newStatus = order.status;
-
-      if (order.method === "dropoff") newStatus = "done";
-      else if (order.method === "delivery" && order.status === "in_shop")
-        newStatus = "delivering";
-      else if (order.status === "delivering") newStatus = "done";
-
-      const { error } = await supabase
-        .from("orders")
-        .update({ status: newStatus })
-        .eq("id", order.id);
-
-      if (error) {
-        console.error("Error updating order status:", error);
-        toast.error("Failed to update status");
+      if (!order.order_item_id) {
+        toast.error("Order item ID missing - cannot update status");
         return;
       }
 
-      toast.success(`Order status updated to ${newStatus.replace('_', ' ')}`);
+      let databaseStatus;
+
+      // Map frontend status to database status
+      if (order.method === "dropoff" && order.status === "in_shop") {
+        // Dropoff: in_shop → completed (moves to history)
+        databaseStatus = 'completed';
+      } else if (order.method === "delivery") {
+        if (order.status === "in_shop") {
+          // Delivery: in_shop → delivering
+          databaseStatus = 'delivering';
+        } else if (order.status === "delivering") {
+          // Delivery: delivering → completed (moves to history)
+          databaseStatus = 'completed';
+        }
+      }
+
+      if (!databaseStatus) {
+        toast.error("Invalid status transition");
+        return;
+      }
+
+      console.log("🔄 Updating order status:", {
+        orderItemId: order.order_item_id,
+        frontendStatus: order.status,
+        databaseStatus
+      });
+
+      const response = await fetch('/api/employee/orders', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          orderItemId: order.order_item_id,
+          status: databaseStatus
+        }),
+      });
+
+      // Handle non-JSON responses
+      const responseText = await response.text();
+      let result;
+      try {
+        result = responseText ? JSON.parse(responseText) : {};
+      } catch (parseError) {
+        console.error('JSON parse error:', parseError);
+        throw new Error('Invalid server response');
+      }
+
+      if (!response.ok) {
+        console.error("Server error:", result);
+        throw new Error(result.error || `HTTP error! status: ${response.status}`);
+      }
+
+      if (!result.success) {
+        console.error("Business logic error:", result);
+        throw new Error(result.error || 'Failed to update status');
+      }
+
+      toast.success(result.message || `Order status updated successfully!`);
+      
+      // Refresh orders after a short delay
+      setTimeout(() => {
+        window.location.reload();
+      }, 1000);
       
     } catch (error) {
       console.error("Error changing status:", error);
-      toast.error("Error updating status");
+      toast.error("Error updating status: " + (error as Error).message);
     }
   };
 
@@ -517,7 +621,7 @@ function EmployeeContent() {
                 <div className="flex items-center gap-2 bg-white/10 p-3 rounded-lg">
                   <User className="h-4 w-4 text-white" />
                   <p className="text-white text-sm sm:text-base">
-                    Welcome, <span className="font-semibold">{session?.user?.email?.split('@')[0]}</span>
+                    Welcome, Employee
                   </p>
                 </div>
               </div>
@@ -539,7 +643,7 @@ function EmployeeContent() {
       <div className="max-w-7xl mx-auto">
         <div className="grid grid-cols-1 xl:grid-cols-4 gap-4 sm:gap-6">
           
-          {/* Priority Column - Always show pending */}
+          {/* Priority Column - Always show pending (INBOX) */}
           <section className="xl:col-span-1">
             <Card className="bg-white border-2 border-yellow-300 shadow-lg">
               <CardHeader className="bg-yellow-100 border-b-2 border-yellow-300">
@@ -549,7 +653,7 @@ function EmployeeContent() {
                   </div>
                   <div>
                     <h2 className="text-lg sm:text-xl font-bold text-gray-900">
-                      Action Required
+                      INBOX - Action Required
                     </h2>
                     <p className="text-yellow-700 text-sm font-medium">
                       {pendingOrders.length} order{pendingOrders.length !== 1 ? 's' : ''} waiting
@@ -576,7 +680,7 @@ function EmployeeContent() {
                             onClick={() => handleConfirm(order)}
                             className="bg-blue-600 hover:bg-blue-700 text-white font-semibold"
                           >
-                            Confirm
+                            Confirm Weight
                           </Button>
                         }
                       />
@@ -587,7 +691,7 @@ function EmployeeContent() {
             </Card>
           </section>
 
-          {/* Active Work Column - Wider */}
+          {/* Active Work Column - Wider (WORK QUEUE) */}
           <section className="xl:col-span-3">
             <Card className="bg-white border-2 border-blue-300 shadow-lg h-full">
               <CardHeader className="bg-blue-100 border-b-2 border-blue-300">
@@ -598,7 +702,7 @@ function EmployeeContent() {
                     </div>
                     <div>
                       <CardTitle className="text-lg sm:text-xl font-bold text-gray-900">
-                        Active Orders
+                        WORK QUEUE - Active Orders
                       </CardTitle>
                       <p className="text-blue-700 text-sm font-medium">
                         {ongoingOrders.length} order{ongoingOrders.length !== 1 ? 's' : ''} in progress
@@ -624,7 +728,7 @@ function EmployeeContent() {
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                     {filteredOngoingOrders.map(order => (
                       <OrderCard 
-                        key={order.id}
+                        key={order.order_item_id || order.id}
                         order={order}
                         onStatusChange={handleStatusChange}
                         showDetails={true}
@@ -640,7 +744,7 @@ function EmployeeContent() {
         {/* Recent Completions - Collapsible */}
         <div className="mt-4 sm:mt-6">
           <CollapsibleSection 
-            title={`Recent Completions (${orderHistory.length})`}
+            title={`Order History (${orderHistory.length})`}
             defaultOpen={orderHistory.length > 0}
           >
             {orderHistory.length === 0 ? (
@@ -651,18 +755,19 @@ function EmployeeContent() {
             ) : (
               <div className="space-y-3">
                 {orderHistory.slice(0, 10).map(order => (
-                  <div key={order.id} className="flex items-center justify-between p-4 bg-green-50 border-2 border-green-200 rounded-lg">
+                  <div key={order.order_item_id || order.id} className="flex items-center justify-between p-4 bg-green-50 border-2 border-green-200 rounded-lg">
                     <div>
                       <p className="font-semibold text-gray-900">{order.customer_name}</p>
                       <p className="text-sm text-gray-600">
                         {order.services?.name} • {order.kilo ? `${order.kilo} kg` : 'Weight not set'} • 
-                        <span className="capitalize"> {order.method}</span>
+                        <span className="capitalize"> {order.method_label}</span>
                       </p>
                     </div>
                     <div className="text-right">
                       <p className="font-bold text-blue-700">₱{(order.amount || 0).toFixed(2)}</p>
                       <p className="text-xs text-gray-500">
-                        {order.created_at ? new Date(order.created_at).toLocaleDateString() : ''}
+                        {order.completed_at ? new Date(order.completed_at).toLocaleDateString() : 
+                         order.created_at ? new Date(order.created_at).toLocaleDateString() : ''}
                       </p>
                     </div>
                   </div>
@@ -677,7 +782,7 @@ function EmployeeContent() {
       {showModal && currentOrder && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white p-6 rounded-2xl shadow-2xl w-full max-w-sm border-2 border-blue-300">
-            <h3 className="text-lg font-bold text-gray-900 mb-2">Confirm Order</h3>
+            <h3 className="text-lg font-bold text-gray-900 mb-2">Confirm Order Weight</h3>
             <p className="text-sm text-gray-600 mb-4">
               Enter weight for <strong className="text-blue-700">{currentOrder.customer_name}</strong>
               {currentOrder.services && (
@@ -708,6 +813,9 @@ function EmployeeContent() {
                   <p className="text-sm font-semibold text-blue-800">
                     Calculated amount: <strong>₱{(parseFloat(weight) * currentOrder.services.price).toFixed(2)}</strong>
                   </p>
+                  <p className="text-xs text-blue-600 mt-1">
+                    Order will move to <strong>Work Queue</strong> after confirmation
+                  </p>
                 </div>
               )}
             </div>
@@ -729,7 +837,7 @@ function EmployeeContent() {
                 disabled={!weight || isNaN(parseFloat(weight)) || parseFloat(weight) <= 0}
                 className="bg-blue-600 hover:bg-blue-700 text-white font-semibold"
               >
-                Save & Confirm
+                Save & Move to Work Queue
               </Button>
             </div>
           </div>

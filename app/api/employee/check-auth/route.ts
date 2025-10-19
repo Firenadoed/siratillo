@@ -1,9 +1,8 @@
-// app/api/employee/check-auth/route.ts
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { supabaseServer } from '@/lib/supabaseServer'
 import { NextResponse } from 'next/server'
 
-// Use the same interface pattern as your login route
+// Use the same interfaces as your owner auth
 interface Role {
   name: string;
 }
@@ -11,7 +10,7 @@ interface Role {
 interface UserRole {
   user_id: string;
   role_id: string;
-  roles: Role; // Single object, not array
+  roles: Role;
 }
 
 interface Shop {
@@ -27,33 +26,33 @@ interface Branch {
   is_active: boolean;
 }
 
-// Match the pattern from your login route - single objects, not arrays
 interface AssignmentWithJoins {
   shop_id: string;
   branch_id: string;
   role_in_shop: string;
-  shops: Shop; // Single object
-  shop_branches: Branch; // Single object
+  shops: Shop;
+  shop_branches: Branch;
 }
 
 export async function GET() {
   try {
+    // Use server-side client with getUser (recommended)
     const supabaseAuth = await supabaseServer()
     
-    const { data: { session }, error: sessionError } = await supabaseAuth.auth.getSession()
+    const { data: { user }, error: userError } = await supabaseAuth.auth.getUser()
     
-    if (sessionError) {
-      console.error("Session error:", sessionError)
-      return NextResponse.json({ authorized: false, error: "Session error" })
+    if (userError) {
+      console.error("Employee getUser error:", userError)
+      return NextResponse.json({ authorized: false, error: "Authentication error" })
     }
     
-    if (!session) {
+    if (!user) {
       return NextResponse.json({ authorized: false, error: "Not authenticated" })
     }
 
-    console.log("🔐 Employee check-auth: User authenticated - ID:", session.user.id)
+    console.log("🔐 Employee check-auth: User authenticated - ID:", user.id)
 
-    // Use the same pattern as your login route with proper TypeScript casting
+    // Check for employee role
     const { data: roleData, error: roleError } = await supabaseAdmin
       .from("user_roles")
       .select(`
@@ -63,10 +62,15 @@ export async function GET() {
           name
         )
       `)
-      .eq("user_id", session.user.id) as { data: UserRole[] | null, error: any }
+      .eq("user_id", user.id) as { data: UserRole[] | null, error: any }
+
+    console.log("📊 Employee check-auth role query result:", {
+      hasRoles: !!roleData?.length,
+      error: roleError?.message
+    })
 
     if (roleError) {
-      console.error("Role query error:", roleError)
+      console.error("Employee Role query error:", roleError)
       return NextResponse.json({ authorized: false, error: "Failed to check permissions" })
     }
 
@@ -74,9 +78,7 @@ export async function GET() {
       return NextResponse.json({ authorized: false, error: "No role assigned" })
     }
 
-    // Use the same access pattern as your login route
-    console.log("🔍 Full roleData[0]:", JSON.stringify(roleData[0], null, 2))
-    
+    // Check for employee role
     const hasEmployeeRole = roleData.some(role => role.roles?.name === 'employee')
     console.log("🎭 Employee check-auth hasEmployeeRole:", hasEmployeeRole)
 
@@ -85,7 +87,7 @@ export async function GET() {
       return NextResponse.json({ authorized: false, error: "Employee access required" })
     }
 
-    // Get shop assignments with the same TypeScript pattern as login route
+    // Get employee assignments
     const { data: assignments, error: assignmentsError } = await supabaseAdmin
       .from('shop_user_assignments')
       .select(`
@@ -104,19 +106,21 @@ export async function GET() {
           is_active
         )
       `)
-      .eq('user_id', session.user.id)
+      .eq('user_id', user.id)
       .eq('is_active', true)
       .eq('role_in_shop', 'employee') as { data: AssignmentWithJoins[] | null, error: any }
 
+    console.log("📋 Employee assignments result:", {
+      assignmentsCount: assignments?.length,
+      error: assignmentsError?.message
+    })
+
     if (assignmentsError) {
-      console.error("Assignments error:", assignmentsError)
-      return NextResponse.json({ authorized: false, error: "Error fetching assignments: " + assignmentsError.message })
+      console.error("Employee Assignments error:", assignmentsError)
+      return NextResponse.json({ authorized: false, error: "Error fetching assignments" })
     }
 
-    console.log("✅ Employee auth successful for:", session.user.email)
-    console.log("🏪 Employee assignments raw:", assignments)
-
-    // Simplify transformation - since we're using the same pattern as login, we don't need complex array handling
+    // Transform assignments
     const transformedAssignments = (assignments || []).map(assignment => ({
       shop_id: assignment.shop_id,
       branch_id: assignment.branch_id,
@@ -125,9 +129,8 @@ export async function GET() {
       branch: assignment.shop_branches
     }));
 
-    console.log("🏪 Transformed assignments:", transformedAssignments);
+    console.log("✅ Employee auth successful for:", user.email)
 
-    // Check if we have valid assignments
     if (transformedAssignments.length === 0) {
       return NextResponse.json({ 
         authorized: false, 
@@ -138,8 +141,8 @@ export async function GET() {
     return NextResponse.json({ 
       authorized: true,
       user: {
-        id: session.user.id,
-        email: session.user.email
+        id: user.id,
+        email: user.email
       },
       assignments: transformedAssignments
     })
@@ -148,7 +151,7 @@ export async function GET() {
     console.error("Employee auth check error:", error)
     return NextResponse.json({ 
       authorized: false, 
-      error: error.message || "Internal server error"
+      error: error.message 
     }, { status: 500 })
   }
 }

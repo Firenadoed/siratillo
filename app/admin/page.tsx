@@ -73,6 +73,11 @@ export default function ManageShops() {
   const [deleteBranchId, setDeleteBranchId] = useState<string | null>(null);
   const [deleteOwnerId, setDeleteOwnerId] = useState<string | null>(null);
 
+  // Loading states for forms
+  const [isSubmittingShop, setIsSubmittingShop] = useState(false);
+  const [isSubmittingBranch, setIsSubmittingBranch] = useState(false);
+  const [isSubmittingOwner, setIsSubmittingOwner] = useState(false);
+
   // ==============================
   // Authentication & Authorization Check
   // ==============================
@@ -160,8 +165,16 @@ export default function ManageShops() {
   };
 
   // Add/Edit/Delete Shop - SECURE
-  const handleSaveShop = async () => {
+  const handleSaveShop = async (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    
+    if (isSubmittingShop) return;
     if (!newShopName.trim()) return toast.error("Shop name required");
+    
+    setIsSubmittingShop(true);
     
     try {
       const url = editingShop ? `/api/admin/shops/${editingShop.id}` : '/api/admin/shops';
@@ -188,6 +201,8 @@ export default function ManageShops() {
       toast.success(editingShop ? "Shop updated" : "Shop added");
     } catch (error: any) {
       toast.error("Failed to save shop: " + error.message);
+    } finally {
+      setIsSubmittingShop(false);
     }
   };
 
@@ -212,8 +227,16 @@ export default function ManageShops() {
   };
 
   // Add/Edit/Delete Branch - SECURE
-  const handleSaveBranch = async () => {
+  const handleSaveBranch = async (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    
+    if (isSubmittingBranch) return;
     if (!branchLocation || !openAddBranch.shopId) return toast.error("Select branch location.");
+    
+    setIsSubmittingBranch(true);
     
     try {
       const url = editingBranch ? `/api/admin/branches/${editingBranch.id}` : '/api/admin/branches';
@@ -244,6 +267,8 @@ export default function ManageShops() {
       toast.success(editingBranch ? "Branch updated" : "Branch added");
     } catch (error: any) {
       toast.error("Failed to save branch: " + error.message);
+    } finally {
+      setIsSubmittingBranch(false);
     }
   };
 
@@ -268,13 +293,25 @@ export default function ManageShops() {
   };
 
   // Add/Edit/Delete Owner - SECURE
-  const handleSaveOwner = async () => {
+  const handleSaveOwner = async (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    
+    if (isSubmittingOwner) return;
     if (!newOwnerName.trim() || !newOwnerEmail.trim()) return toast.error("Name and Email required");
+    
+    setIsSubmittingOwner(true);
     
     try {
       if (editingOwner) {
         // EDIT EXISTING OWNER
-        if (!newOwnerShop) return toast.error("Please select a shop");
+        if (!newOwnerShop) {
+          toast.error("Please select a shop");
+          setIsSubmittingOwner(false);
+          return;
+        }
         
         const response = await fetch(`/api/admin/owners/${editingOwner.id}`, {
           method: 'PUT',
@@ -291,17 +328,21 @@ export default function ManageShops() {
         if (error) throw new Error(error);
         
         setOpenAddOwner(false);
-        setNewOwnerName("");
-        setNewOwnerEmail("");
-        setNewOwnerPassword("");
-        setNewOwnerShop("");
-        setEditingOwner(null);
+        resetOwnerForm();
         fetchOwners();
         toast.success("Owner updated successfully");
       } else {
         // ADD NEW OWNER
-        if (!newOwnerPassword.trim()) return toast.error("Password required for new owner");
-        if (!newOwnerShop) return toast.error("Please select a shop");
+        if (!newOwnerPassword.trim()) {
+          toast.error("Password required for new owner");
+          setIsSubmittingOwner(false);
+          return;
+        }
+        if (!newOwnerShop) {
+          toast.error("Please select a shop");
+          setIsSubmittingOwner(false);
+          return;
+        }
         
         const response = await fetch('/api/admin/owners', {
           method: 'POST',
@@ -319,15 +360,14 @@ export default function ManageShops() {
         if (error) throw new Error(error);
         
         setOpenAddOwner(false);
-        setNewOwnerName("");
-        setNewOwnerEmail("");
-        setNewOwnerPassword("");
-        setNewOwnerShop("");
+        resetOwnerForm();
         fetchOwners();
         toast.success("Owner added successfully");
       }
     } catch (error: any) {
       toast.error("Failed to save owner: " + error.message);
+    } finally {
+      setIsSubmittingOwner(false);
     }
   };
 
@@ -356,6 +396,7 @@ export default function ManageShops() {
     setNewShopName("");
     setNewShopAddress("");
     setEditingShop(null);
+    setIsSubmittingShop(false);
   };
 
   const resetBranchForm = () => {
@@ -364,6 +405,7 @@ export default function ManageShops() {
     setBranchLocation([9.308, 123.308]);
     setEditingBranch(null);
     setOpenAddBranch({ open: false, shopId: null });
+    setIsSubmittingBranch(false);
   };
 
   const resetOwnerForm = () => {
@@ -372,6 +414,7 @@ export default function ManageShops() {
     setNewOwnerPassword("");
     setNewOwnerShop("");
     setEditingOwner(null);
+    setIsSubmittingOwner(false);
   };
 
   // ==============================
@@ -464,15 +507,27 @@ export default function ManageShops() {
                           </Button>
                           <AlertDialog>
                             <AlertDialogTrigger asChild>
-                              <Button size="sm" variant="destructive">Delete</Button>
+                              <Button 
+                                size="sm" 
+                                variant="destructive"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                Delete
+                              </Button>
                             </AlertDialogTrigger>
                             <AlertDialogContent>
                               <AlertDialogHeader>
                                 <AlertDialogTitle>Delete Branch?</AlertDialogTitle>
                               </AlertDialogHeader>
                               <AlertDialogFooter>
-                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                <AlertDialogAction onClick={() => { setDeleteBranchId(b.id); handleDeleteBranch(); }}>
+                                <AlertDialogCancel onClick={(e) => e.stopPropagation()}>Cancel</AlertDialogCancel>
+                                <AlertDialogAction 
+                                  onClick={(e) => { 
+                                    e.stopPropagation();
+                                    setDeleteBranchId(b.id); 
+                                    handleDeleteBranch(); 
+                                  }}
+                                >
                                   Delete
                                 </AlertDialogAction>
                               </AlertDialogFooter>
@@ -488,7 +543,8 @@ export default function ManageShops() {
                 <div className="flex flex-wrap gap-1 mt-2 sm:mt-0">
                   <Button 
                     size="sm" 
-                    onClick={() => { 
+                    onClick={(e) => { 
+                      e.stopPropagation();
                       setEditingShop(shop); 
                       setNewShopName(shop.name); 
                       setNewShopAddress(shop.description || ""); 
@@ -499,15 +555,27 @@ export default function ManageShops() {
                   </Button>
                   <AlertDialog>
                     <AlertDialogTrigger asChild>
-                      <Button size="sm" variant="destructive">Delete</Button>
+                      <Button 
+                        size="sm" 
+                        variant="destructive"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        Delete
+                      </Button>
                     </AlertDialogTrigger>
                     <AlertDialogContent>
                       <AlertDialogHeader>
                         <AlertDialogTitle>Delete Shop?</AlertDialogTitle>
                       </AlertDialogHeader>
                       <AlertDialogFooter>
-                        <AlertDialogCancel>Cancel</AlertDialogCancel>
-                        <AlertDialogAction onClick={() => { setDeleteShopId(shop.id); handleDeleteShop(); }}>
+                        <AlertDialogCancel onClick={(e) => e.stopPropagation()}>Cancel</AlertDialogCancel>
+                        <AlertDialogAction 
+                          onClick={(e) => { 
+                            e.stopPropagation();
+                            setDeleteShopId(shop.id); 
+                            handleDeleteShop(); 
+                          }}
+                        >
                           Delete
                         </AlertDialogAction>
                       </AlertDialogFooter>
@@ -515,7 +583,10 @@ export default function ManageShops() {
                   </AlertDialog>
                   <Button 
                     size="sm" 
-                    onClick={() => setOpenAddBranch({ open: true, shopId: shop.id })}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setOpenAddBranch({ open: true, shopId: shop.id });
+                    }}
                   >
                     + Add Branch
                   </Button>
@@ -564,7 +635,8 @@ export default function ManageShops() {
                   <div className="flex flex-wrap gap-1 mt-2 sm:mt-0">
                     <Button 
                       size="sm" 
-                      onClick={() => { 
+                      onClick={(e) => { 
+                        e.stopPropagation();
                         setEditingOwner(owner); 
                         setNewOwnerName(owner.full_name); 
                         setNewOwnerEmail(owner.email); 
@@ -576,15 +648,27 @@ export default function ManageShops() {
                     </Button>
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
-                        <Button size="sm" variant="destructive">Delete</Button>
+                        <Button 
+                          size="sm" 
+                          variant="destructive"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          Delete
+                        </Button>
                       </AlertDialogTrigger>
                       <AlertDialogContent>
                         <AlertDialogHeader>
                           <AlertDialogTitle>Delete Owner?</AlertDialogTitle>
                         </AlertDialogHeader>
                         <AlertDialogFooter>
-                          <AlertDialogCancel>Cancel</AlertDialogCancel>
-                          <AlertDialogAction onClick={() => { setDeleteOwnerId(owner.id); handleDeleteOwner(); }}>
+                          <AlertDialogCancel onClick={(e) => e.stopPropagation()}>Cancel</AlertDialogCancel>
+                          <AlertDialogAction 
+                            onClick={(e) => { 
+                              e.stopPropagation();
+                              setDeleteOwnerId(owner.id); 
+                              handleDeleteOwner(); 
+                            }}
+                          >
                             Delete
                           </AlertDialogAction>
                         </AlertDialogFooter>
@@ -607,23 +691,32 @@ export default function ManageShops() {
           <DialogHeader>
             <DialogTitle>{editingShop ? "Edit Shop" : "Add Shop"}</DialogTitle>
           </DialogHeader>
-          <Input 
-            placeholder="Shop Name" 
-            value={newShopName} 
-            onChange={(e) => setNewShopName(e.target.value)} 
-            className="mb-2" 
-          />
-          <Input 
-            placeholder="Description" 
-            value={newShopAddress} 
-            onChange={(e) => setNewShopAddress(e.target.value)} 
-            className="mb-2" 
-          />
-          <DialogFooter>
-            <Button onClick={handleSaveShop}>
-              {editingShop ? "Update Shop" : "Add Shop"}
-            </Button>
-          </DialogFooter>
+          <form onSubmit={(e) => {
+            e.preventDefault();
+            handleSaveShop();
+          }}>
+            <Input 
+              placeholder="Shop Name" 
+              value={newShopName} 
+              onChange={(e) => setNewShopName(e.target.value)} 
+              className="mb-2" 
+              required
+            />
+            <Input 
+              placeholder="Description" 
+              value={newShopAddress} 
+              onChange={(e) => setNewShopAddress(e.target.value)} 
+              className="mb-2" 
+            />
+            <DialogFooter>
+              <Button 
+                type="submit"
+                disabled={isSubmittingShop}
+              >
+                {isSubmittingShop ? "Saving..." : (editingShop ? "Update Shop" : "Add Shop")}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 
@@ -636,24 +729,34 @@ export default function ManageShops() {
           <DialogHeader>
             <DialogTitle>{editingBranch ? "Edit Branch" : "Add Branch"}</DialogTitle>
           </DialogHeader>
-          <Input 
-            placeholder="Branch Name" 
-            value={branchName} 
-            onChange={(e) => setBranchName(e.target.value)} 
-            className="mb-2" 
-          />
-          <Input 
-            placeholder="Address" 
-            value={branchAddress} 
-            onChange={(e) => setBranchAddress(e.target.value)} 
-            className="mb-2" 
-          />
-          <BranchMap location={branchLocation} setLocation={setBranchLocation} />
-          <DialogFooter>
-            <Button onClick={handleSaveBranch}>
-              {editingBranch ? "Update Branch" : "Add Branch"}
-            </Button>
-          </DialogFooter>
+          <form onSubmit={(e) => {
+            e.preventDefault();
+            handleSaveBranch();
+          }}>
+            <Input 
+              placeholder="Branch Name" 
+              value={branchName} 
+              onChange={(e) => setBranchName(e.target.value)} 
+              className="mb-2" 
+              required
+            />
+            <Input 
+              placeholder="Address" 
+              value={branchAddress} 
+              onChange={(e) => setBranchAddress(e.target.value)} 
+              className="mb-2" 
+              required
+            />
+            <BranchMap location={branchLocation} setLocation={setBranchLocation} />
+            <DialogFooter>
+              <Button 
+                type="submit"
+                disabled={isSubmittingBranch}
+              >
+                {isSubmittingBranch ? "Saving..." : (editingBranch ? "Update Branch" : "Add Branch")}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 
@@ -666,45 +769,57 @@ export default function ManageShops() {
           <DialogHeader>
             <DialogTitle>{editingOwner ? "Edit Owner" : "Add Owner"}</DialogTitle>
           </DialogHeader>
-          <Input 
-            placeholder="Full Name" 
-            value={newOwnerName} 
-            onChange={(e) => setNewOwnerName(e.target.value)} 
-            className="mb-2" 
-          />
-          <Input 
-            placeholder="Email" 
-            value={newOwnerEmail} 
-            onChange={(e) => setNewOwnerEmail(e.target.value)} 
-            className="mb-2" 
-          />
-          {/* Only show password field when adding new owner */}
-          {!editingOwner && (
+          <form onSubmit={(e) => {
+            e.preventDefault();
+            handleSaveOwner();
+          }}>
             <Input 
-              placeholder="Password" 
-              type="password" 
-              value={newOwnerPassword} 
-              onChange={(e) => setNewOwnerPassword(e.target.value)} 
+              placeholder="Full Name" 
+              value={newOwnerName} 
+              onChange={(e) => setNewOwnerName(e.target.value)} 
               className="mb-2" 
+              required
             />
-          )}
-          <Select onValueChange={setNewOwnerShop} value={newOwnerShop}>
-            <SelectTrigger className="w-full mb-2">
-              <SelectValue placeholder="Select Shop" />
-            </SelectTrigger>
-            <SelectContent>
-              {shops.map((s) => (
-                <SelectItem key={s.id} value={s.id}>
-                  {s.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <DialogFooter>
-            <Button onClick={handleSaveOwner}>
-              {editingOwner ? "Update Owner" : "Add Owner"}
-            </Button>
-          </DialogFooter>
+            <Input 
+              placeholder="Email" 
+              type="email"
+              value={newOwnerEmail} 
+              onChange={(e) => setNewOwnerEmail(e.target.value)} 
+              className="mb-2" 
+              required
+            />
+            {/* Only show password field when adding new owner */}
+            {!editingOwner && (
+              <Input 
+                placeholder="Password" 
+                type="password" 
+                value={newOwnerPassword} 
+                onChange={(e) => setNewOwnerPassword(e.target.value)} 
+                className="mb-2" 
+                required
+              />
+            )}
+            <Select onValueChange={setNewOwnerShop} value={newOwnerShop} required>
+              <SelectTrigger className="w-full mb-2">
+                <SelectValue placeholder="Select Shop" />
+              </SelectTrigger>
+              <SelectContent>
+                {shops.map((s) => (
+                  <SelectItem key={s.id} value={s.id}>
+                    {s.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <DialogFooter>
+              <Button 
+                type="submit"
+                disabled={isSubmittingOwner}
+              >
+                {isSubmittingOwner ? "Saving..." : (editingOwner ? "Update Owner" : "Add Owner")}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     </div>
