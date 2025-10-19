@@ -118,7 +118,8 @@ export async function GET(request: Request) {
         id: service.id,
         name: service.name,
         price: service.price_per_kg,
-        description: service.description
+        description: service.description,
+        image_url: service.image_url
       })),
       error: null
     })
@@ -129,7 +130,7 @@ export async function GET(request: Request) {
   }
 }
 
-// POST - Add new service to a specific branch
+// POST - Add new service to a specific branch with image
 export async function POST(request: Request) {
   try {
     const supabaseAuth = await supabaseServer()
@@ -139,7 +140,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
     }
 
-    const { name, price, description, branchId } = await request.json()
+    const formData = await request.formData()
+    const name = formData.get('name') as string
+    const price = formData.get('price') as string
+    const description = formData.get('description') as string
+    const branchId = formData.get('branchId') as string
+    const imageFile = formData.get('image') as File | null
 
     if (!name || !price || !description || !branchId) {
       return NextResponse.json({ error: "All fields are required" }, { status: 400 })
@@ -179,6 +185,33 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "A service with this name already exists in this branch" }, { status: 409 })
     }
 
+    let imageUrl = null
+
+    // Upload image if provided
+    if (imageFile) {
+      const fileExt = imageFile.name.split('.').pop()
+      const fileName = `${user.id}/${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`
+      const filePath = `service-icons/${fileName}`
+
+      const { data: uploadData, error: uploadError } = await supabaseAdmin
+        .storage
+        .from('services')
+        .upload(filePath, imageFile)
+
+      if (uploadError) {
+        console.error("Image upload error:", uploadError)
+        return NextResponse.json({ error: "Failed to upload image" }, { status: 500 })
+      }
+
+      // Get public URL
+      const { data: { publicUrl } } = supabaseAdmin
+        .storage
+        .from('services')
+        .getPublicUrl(filePath)
+
+      imageUrl = publicUrl
+    }
+
     // Insert into shop_services for the specific branch
     const { data, error } = await supabaseAdmin
       .from('shop_services')
@@ -188,6 +221,7 @@ export async function POST(request: Request) {
           name: name.trim(),
           price_per_kg: parseFloat(price),
           description: description.trim(),
+          image_url: imageUrl,
           is_active: true,
         },
       ])
@@ -203,7 +237,8 @@ export async function POST(request: Request) {
       id: data[0].id,
       name: data[0].name,
       price: data[0].price_per_kg,
-      description: data[0].description
+      description: data[0].description,
+      image_url: data[0].image_url
     }
 
     return NextResponse.json({ service: transformedService, error: null })
@@ -214,7 +249,7 @@ export async function POST(request: Request) {
   }
 }
 
-// PUT - Update service
+// PUT - Update service with optional image update
 export async function PUT(request: Request) {
   try {
     const supabaseAuth = await supabaseServer()
@@ -224,7 +259,13 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
     }
 
-    const { id, name, price, description } = await request.json()
+    const formData = await request.formData()
+    const id = formData.get('id') as string
+    const name = formData.get('name') as string
+    const price = formData.get('price') as string
+    const description = formData.get('description') as string
+    const imageFile = formData.get('image') as File | null
+    const removeImage = formData.get('removeImage') === 'true'
 
     if (!id || !name || !price || !description) {
       return NextResponse.json({ error: "All fields are required" }, { status: 400 })
@@ -244,7 +285,7 @@ export async function PUT(request: Request) {
     // Check service ownership through branch and shop
     const { data: service } = await supabaseAdmin
       .from('shop_services')
-      .select('id, branch_id')
+      .select('id, branch_id, image_url')
       .eq('id', id)
       .single()
 
@@ -264,6 +305,59 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: "Service access denied" }, { status: 403 })
     }
 
+    let imageUrl = service.image_url
+
+    // Handle image removal
+    if (removeImage && service.image_url) {
+      // Extract file path from URL and delete from storage
+      const urlParts = service.image_url.split('/')
+      const fileName = urlParts[urlParts.length - 1]
+      const filePath = `service-icons/${user.id}/${fileName}`
+
+      await supabaseAdmin
+        .storage
+        .from('services')
+        .remove([filePath])
+
+      imageUrl = null
+    }
+
+    // Upload new image if provided
+    if (imageFile) {
+      // Delete old image if exists
+      if (service.image_url) {
+        const urlParts = service.image_url.split('/')
+        const fileName = urlParts[urlParts.length - 1]
+        const filePath = `service-icons/${user.id}/${fileName}`
+
+        await supabaseAdmin
+          .storage
+          .from('services')
+          .remove([filePath])
+      }
+
+      const fileExt = imageFile.name.split('.').pop()
+      const fileName = `${user.id}/${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`
+      const filePath = `service-icons/${fileName}`
+
+      const { data: uploadData, error: uploadError } = await supabaseAdmin
+        .storage
+        .from('services')
+        .upload(filePath, imageFile)
+
+      if (uploadError) {
+        console.error("Image upload error:", uploadError)
+        return NextResponse.json({ error: "Failed to upload image" }, { status: 500 })
+      }
+
+      const { data: { publicUrl } } = supabaseAdmin
+        .storage
+        .from('services')
+        .getPublicUrl(filePath)
+
+      imageUrl = publicUrl
+    }
+
     // Update shop_services
     const { error } = await supabaseAdmin
       .from('shop_services')
@@ -271,6 +365,7 @@ export async function PUT(request: Request) {
         name: name.trim(),
         price_per_kg: parseFloat(price),
         description: description.trim(),
+        image_url: imageUrl,
       })
       .eq('id', id)
 
@@ -424,7 +519,7 @@ export async function DELETE(request: Request) {
     // Check service ownership through branch and shop
     const { data: service } = await supabaseAdmin
       .from('shop_services')
-      .select('id, branch_id')
+      .select('id, branch_id, image_url')
       .eq('id', id)
       .single()
 
@@ -442,6 +537,18 @@ export async function DELETE(request: Request) {
 
     if (!branch) {
       return NextResponse.json({ error: "Service access denied" }, { status: 403 })
+    }
+
+    // Delete image from storage if exists
+    if (service.image_url) {
+      const urlParts = service.image_url.split('/')
+      const fileName = urlParts[urlParts.length - 1]
+      const filePath = `service-icons/${user.id}/${fileName}`
+
+      await supabaseAdmin
+        .storage
+        .from('services')
+        .remove([filePath])
     }
 
     // Soft delete by setting is_active = false

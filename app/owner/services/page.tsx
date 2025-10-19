@@ -14,7 +14,7 @@ import {
   DialogTrigger,
 } from "@/lib/ui/dialog"
 import { Input } from "@/lib/ui/input"
-import { Package, Truck, ShoppingBag, Droplets, Sparkles } from "lucide-react"
+import { Package, Truck, ShoppingBag, Droplets, Sparkles, Image, ImageUp, X } from "lucide-react"
 import { Toaster, toast } from "sonner";
 import { useBranch } from "@/lib/branchcontext"
 
@@ -23,6 +23,7 @@ type Service = {
   name: string
   price: number
   description: string
+  image_url?: string | null
 }
 
 type Detergent = {
@@ -66,8 +67,23 @@ function ServicesContent() {
   const [loading, setLoading] = useState(true)
   const [currentBranchName, setCurrentBranchName] = useState<string>('')
 
-  const [newService, setNewService] = useState({ name: "", price: "", description: "" })
+  const [newService, setNewService] = useState({ 
+    name: "", 
+    price: "", 
+    description: "", 
+    image: null as File | null,
+    imagePreview: "" 
+  })
   const [editingService, setEditingService] = useState<Service | null>(null)
+  const [editingServiceImage, setEditingServiceImage] = useState<{
+    file: File | null
+    preview: string
+    removeCurrent: boolean
+  }>({
+    file: null,
+    preview: '',
+    removeCurrent: false
+  })
   const [serviceToDelete, setServiceToDelete] = useState<Service | null>(null)
 
   // New state for detergents/softeners
@@ -129,6 +145,53 @@ function ServicesContent() {
     fetchData()
   }, [selectedBranch, branchChangeTrigger])
 
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, isEdit: boolean = false) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        toast.error('Please upload an image file')
+        return
+      }
+
+      // Validate file size (max 5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        toast.error('Image size should be less than 5MB')
+        return
+      }
+
+      if (isEdit) {
+        setEditingServiceImage({
+          file,
+          preview: URL.createObjectURL(file),
+          removeCurrent: false
+        })
+      } else {
+        setNewService(prev => ({
+          ...prev,
+          image: file,
+          imagePreview: URL.createObjectURL(file)
+        }))
+      }
+    }
+  }
+
+  const removeImage = (isEdit: boolean = false) => {
+    if (isEdit) {
+      setEditingServiceImage({
+        file: null,
+        preview: '',
+        removeCurrent: true
+      })
+    } else {
+      setNewService(prev => ({
+        ...prev,
+        image: null,
+        imagePreview: ''
+      }))
+    }
+  }
+
   const updateMethod = async (field: string, value: boolean) => {
     if (!selectedBranch) {
       toast.error("Please select a branch first")
@@ -182,15 +245,19 @@ function ServicesContent() {
     }
 
     try {
+      const formData = new FormData()
+      formData.append('name', newService.name)
+      formData.append('price', newService.price)
+      formData.append('description', newService.description)
+      formData.append('branchId', selectedBranch.id)
+      
+      if (newService.image) {
+        formData.append('image', newService.image)
+      }
+
       const response = await fetch('/api/owner/services', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: newService.name,
-          price: newService.price,
-          description: newService.description,
-          branchId: selectedBranch.id
-        })
+        body: formData
       })
 
       const { service, error } = await response.json()
@@ -201,7 +268,13 @@ function ServicesContent() {
       }
 
       setServices(prev => [...prev, service])
-      setNewService({ name: "", price: "", description: "" })
+      setNewService({ 
+        name: "", 
+        price: "", 
+        description: "", 
+        image: null,
+        imagePreview: "" 
+      })
       toast.success("Service added successfully")
       
     } catch (error: any) {
@@ -217,15 +290,23 @@ function ServicesContent() {
     }
 
     try {
+      const formData = new FormData()
+      formData.append('id', editingService.id)
+      formData.append('name', editingService.name)
+      formData.append('price', editingService.price.toString())
+      formData.append('description', editingService.description)
+      
+      if (editingServiceImage.file) {
+        formData.append('image', editingServiceImage.file)
+      }
+      
+      if (editingServiceImage.removeCurrent) {
+        formData.append('removeImage', 'true')
+      }
+
       const response = await fetch('/api/owner/services', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: editingService.id,
-          name: editingService.name,
-          price: editingService.price,
-          description: editingService.description
-        })
+        body: formData
       })
 
       const { error } = await response.json()
@@ -235,10 +316,19 @@ function ServicesContent() {
         return
       }
 
+      // Update local state with new image URL if changed
+      const updatedService = {
+        ...editingService,
+        image_url: editingServiceImage.removeCurrent ? null : 
+                  editingServiceImage.file ? editingServiceImage.preview : editingService.image_url
+      }
+
       setServices(prev => 
-        prev.map(s => s.id === editingService.id ? editingService : s)
+        prev.map(s => s.id === editingService.id ? updatedService : s)
       )
+      
       setEditingService(null)
+      setEditingServiceImage({ file: null, preview: '', removeCurrent: false })
       toast.success("Service updated successfully")
       
     } catch (error: any) {
@@ -269,6 +359,14 @@ function ServicesContent() {
       
     } catch (error: any) {
       toast.error("Failed to delete service")
+    }
+  }
+
+  // Reset edit state when dialog closes
+  const handleEditDialogChange = (open: boolean) => {
+    if (!open) {
+      setEditingService(null)
+      setEditingServiceImage({ file: null, preview: '', removeCurrent: false })
     }
   }
 
@@ -704,6 +802,55 @@ function ServicesContent() {
                 <DialogTitle>Add Service</DialogTitle>
               </DialogHeader>
               <div className="space-y-4">
+                {/* Image Upload */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Service Icon</label>
+                  <div className="flex items-center gap-4">
+                    {newService.imagePreview ? (
+                      <div className="relative">
+                        <img 
+                          src={newService.imagePreview} 
+                          alt="Preview" 
+                          className="w-16 h-16 rounded-lg object-cover"
+                        />
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="destructive"
+                          className="absolute -top-2 -right-2 h-6 w-6 p-0 rounded-full"
+                          onClick={() => removeImage(false)}
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="w-16 h-16 border-2 border-dashed border-gray-300 rounded-lg flex items-center justify-center">
+                        <ImageUp className="h-6 w-6 text-gray-400" />
+                      </div>
+                    )}
+                    <div>
+                      <Input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => handleImageUpload(e, false)}
+                        className="hidden"
+                        id="service-image"
+                      />
+                      <label htmlFor="service-image">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          asChild
+                        >
+                          <span>Choose Icon</span>
+                        </Button>
+                      </label>
+                      <p className="text-xs text-gray-500 mt-1">PNG, JPG up to 5MB</p>
+                    </div>
+                  </div>
+                </div>
+
                 <Input
                   placeholder="Service Name"
                   value={newService.name}
@@ -758,10 +905,25 @@ function ServicesContent() {
                 className="bg-white shadow-md rounded-xl border hover:shadow-lg transition-all p-4 flex flex-col justify-between h-full"
               >
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-lg font-semibold text-gray-800">
-                    {service.name}
-                  </CardTitle>
-                  <p className="text-sm text-gray-600 line-clamp-2">
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center gap-3">
+                      {service.image_url ? (
+                        <img 
+                          src={service.image_url} 
+                          alt={service.name}
+                          className="w-12 h-12 rounded-lg object-cover"
+                        />
+                      ) : (
+                        <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center">
+                          <Image className="h-6 w-6 text-gray-400" />
+                        </div>
+                      )}
+                      <CardTitle className="text-lg font-semibold text-gray-800">
+                        {service.name}
+                      </CardTitle>
+                    </div>
+                  </div>
+                  <p className="text-sm text-gray-600 line-clamp-2 mt-2">
                     {service.description}
                   </p>
                 </CardHeader>
@@ -775,14 +937,21 @@ function ServicesContent() {
                     {/* Edit */}
                     <Dialog
                       open={editingService?.id === service.id}
-                      onOpenChange={(open) => !open && setEditingService(null)}
+                      onOpenChange={handleEditDialogChange}
                     >
                       <DialogTrigger asChild>
                         <Button
                           size="sm"
                           variant="outline"
                           className="border-yellow-400 text-yellow-600 hover:bg-yellow-50 h-8 px-3"
-                          onClick={() => setEditingService(service)}
+                          onClick={() => {
+                            setEditingService(service)
+                            setEditingServiceImage({
+                              file: null,
+                              preview: '',
+                              removeCurrent: false
+                            })
+                          }}
                         >
                           Edit
                         </Button>
@@ -793,6 +962,72 @@ function ServicesContent() {
                         </DialogHeader>
                         {editingService && (
                           <div className="space-y-4">
+                            {/* Image Upload for Edit */}
+                            <div className="space-y-2">
+                              <label className="text-sm font-medium">Service Icon</label>
+                              <div className="flex items-center gap-4">
+                                {editingServiceImage.preview ? (
+                                  <div className="relative">
+                                    <img 
+                                      src={editingServiceImage.preview} 
+                                      alt="Preview" 
+                                      className="w-16 h-16 rounded-lg object-cover"
+                                    />
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="destructive"
+                                      className="absolute -top-2 -right-2 h-6 w-6 p-0 rounded-full"
+                                      onClick={() => removeImage(true)}
+                                    >
+                                      <X className="h-3 w-3" />
+                                    </Button>
+                                  </div>
+                                ) : editingService.image_url && !editingServiceImage.removeCurrent ? (
+                                  <div className="relative">
+                                    <img 
+                                      src={editingService.image_url} 
+                                      alt={editingService.name}
+                                      className="w-16 h-16 rounded-lg object-cover"
+                                    />
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="destructive"
+                                      className="absolute -top-2 -right-2 h-6 w-6 p-0 rounded-full"
+                                      onClick={() => removeImage(true)}
+                                    >
+                                      <X className="h-3 w-3" />
+                                    </Button>
+                                  </div>
+                                ) : (
+                                  <div className="w-16 h-16 border-2 border-dashed border-gray-300 rounded-lg flex items-center justify-center">
+                                    <ImageUp className="h-6 w-6 text-gray-400" />
+                                  </div>
+                                )}
+                                <div>
+                                  <Input
+                                    type="file"
+                                    accept="image/*"
+                                    onChange={(e) => handleImageUpload(e, true)}
+                                    className="hidden"
+                                    id="edit-service-image"
+                                  />
+                                  <label htmlFor="edit-service-image">
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      asChild
+                                    >
+                                      <span>Choose Icon</span>
+                                    </Button>
+                                  </label>
+                                  <p className="text-xs text-gray-500 mt-1">PNG, JPG up to 5MB</p>
+                                </div>
+                              </div>
+                            </div>
+
                             <Input
                               placeholder="Service Name"
                               value={editingService.name}
