@@ -1,33 +1,67 @@
+// app/api/employee/orders/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { supabaseServer } from '@/lib/supabaseServer'
 
+// 🔔 Notification Helper Function
+async function createOrderNotification(notificationData: {
+  userId: string | null; // Allow null for guests
+  title: string;
+  body: string;
+  payload: any;
+}) {
+  try {
+    // If it's a guest order (customer_id is null), don't create notification
+    if (!notificationData.userId) {
+      console.log('👤 Guest order - skipping notification');
+      return;
+    }
+
+    const { error } = await supabaseAdmin
+      .from('notifications')
+      .insert({
+        user_id: notificationData.userId,
+        title: notificationData.title,
+        body: notificationData.body,
+        payload: notificationData.payload,
+        sent_at: new Date().toISOString()
+      });
+
+    if (error) {
+      console.error('❌ Error creating notification:', error);
+    } else {
+      console.log('✅ Notification created for user:', notificationData.userId);
+    }
+  } catch (error) {
+    console.error('💥 Error in createOrderNotification:', error);
+  }
+}
+
 export async function GET(request: NextRequest) {
   try {
-    console.log('🔍 [1] Starting employee orders API (Server-side)');
+    console.log('🔍 Starting employee orders API');
     
-    // Use server-side client with getUser (recommended)
     const supabaseAuth = await supabaseServer()
     const { data: { user }, error: userError } = await supabaseAuth.auth.getUser()
     
     if (userError || !user) {
-      console.log('❌ [2] No user found in API route');
+      console.log('❌ No user found in API route');
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
     }
 
-    console.log('✅ [3] User authenticated in API:', user.email);
+    console.log('✅ User authenticated in API:', user.email);
 
     const { searchParams } = new URL(request.url);
     const branchId = searchParams.get('branch_id');
 
-    console.log('🏪 [4] Branch ID from request:', branchId);
+    console.log('🏪 Branch ID from request:', branchId);
 
     if (!branchId) {
       return NextResponse.json({ error: 'Branch ID required' }, { status: 400 });
     }
 
     // Verify employee assignment
-    console.log('👨‍💼 [5] Checking employee assignment for branch:', branchId);
+    console.log('👨‍💼 Checking employee assignment for branch:', branchId);
     const { data: assignment, error: assignmentError } = await supabaseAdmin
       .from('shop_user_assignments')
       .select('id, shop_id, user_id')
@@ -37,7 +71,7 @@ export async function GET(request: NextRequest) {
       .eq('is_active', true)
       .single();
 
-    console.log('📋 [6] Assignment check result:', { 
+    console.log('📋 Assignment check result:', { 
       assignment, 
       assignmentError: assignmentError?.message 
     });
@@ -48,10 +82,10 @@ export async function GET(request: NextRequest) {
       }, { status: 403 });
     }
 
-    console.log('✅ [7] Employee assignment verified');
+    console.log('✅ Employee assignment verified');
 
     // 1. INBOX: Get orders that don't have order_items
-    console.log('📥 [8] Fetching orders for branch:', branchId);
+    console.log('📥 Fetching orders for branch:', branchId);
     const { data: allOrders, error: ordersError } = await supabaseAdmin
       .from('orders')
       .select(`
@@ -66,13 +100,13 @@ export async function GET(request: NextRequest) {
       .eq('branch_id', branchId)
       .order('created_at', { ascending: true });
 
-    console.log('📦 [9] Orders query result:', { 
+    console.log('📦 Orders query result:', { 
       ordersCount: allOrders?.length, 
       ordersError: ordersError?.message 
     });
 
     // Get order_ids that already have order_items
-    console.log('🔄 [10] Fetching processed order IDs');
+    console.log('🔄 Fetching processed order IDs');
     const { data: processedOrderIds, error: processedError } = await supabaseAdmin
       .from('order_items')
       .select('order_id')
@@ -82,7 +116,7 @@ export async function GET(request: NextRequest) {
     const pendingOrders = allOrders?.filter(order => !processedIds.includes(order.id)) || [];
 
     // 2. WORK QUEUE: Get active order_items with order data
-    console.log('🛒 [11] Fetching all active order_items');
+    console.log('🛒 Fetching all active order_items');
     const { data: activeOrderItems, error: activeError } = await supabaseAdmin
       .from('order_items')
       .select(`
@@ -106,7 +140,7 @@ export async function GET(request: NextRequest) {
     ) || [];
 
     // 3. COMPLETED: Get from order_history table
-    console.log('✅ [12] Fetching completed orders from order_history');
+    console.log('✅ Fetching completed orders from order_history');
     const { data: completedOrders, error: completedError } = await supabaseAdmin
       .from('order_history')
       .select('*')
@@ -114,15 +148,33 @@ export async function GET(request: NextRequest) {
       .order('completed_at', { ascending: false })
       .limit(20);
 
-    console.log('📊 [13] FINAL QUERY RESULTS:', {
+    console.log('📊 FINAL QUERY RESULTS:', {
       pending: pendingOrders.length,
       active: filteredActiveItems.length, 
       completed: completedOrders?.length || 0
     });
 
-    // Transform data
+    // Transform data with CORRECT status mapping
     const transformOrderItem = (orderItem: any) => {
       const order = orderItem.order;
+      
+      // CORRECT STATUS MAPPING - FIXED
+      let frontendStatus: 'in_shop' | 'delivering' | 'done';
+      switch (orderItem.status) {
+        case 'in_progress':
+        case 'ready':
+          frontendStatus = 'in_shop';
+          break;
+        case 'delivering':
+          frontendStatus = 'delivering';
+          break;
+        case 'completed':
+          frontendStatus = 'done';
+          break;
+        default:
+          frontendStatus = 'in_shop';
+      }
+
       return {
         id: order.id,
         order_item_id: orderItem.id,
@@ -133,9 +185,7 @@ export async function GET(request: NextRequest) {
         method_label: order.method?.label || 'Drop-off',
         kilo: orderItem.quantity,
         amount: orderItem.subtotal,
-        status: orderItem.status === 'in_progress' ? 'in_shop' : 
-                orderItem.status === 'ready' ? 'in_shop' :
-                orderItem.status === 'delivering' ? 'delivering' : 'done',
+        status: frontendStatus,
         created_at: order.created_at,
         started_at: orderItem.started_at,
         completed_at: orderItem.completed_at,
@@ -176,7 +226,7 @@ export async function GET(request: NextRequest) {
 
     const transformHistoryOrder = (history: any) => ({
       id: history.id,
-      order_item_id: history.id, // Use history id since order_item is deleted
+      order_item_id: history.id,
       customer_name: history.customer_name,
       detergent: history.detergent_name,
       softener: history.softener_name,
@@ -189,7 +239,7 @@ export async function GET(request: NextRequest) {
       started_at: history.created_at,
       completed_at: history.completed_at,
       services: {
-        id: '', // Not available in history
+        id: '',
         name: history.service_name,
         price: history.price / history.weight
       },
@@ -219,7 +269,6 @@ export async function POST(request: NextRequest) {
   try {
     console.log('🔄 [POST] Starting order processing API');
     
-    // Authentication
     const supabaseAuth = await supabaseServer()
     const { data: { user }, error: userError } = await supabaseAuth.auth.getUser()
     
@@ -237,7 +286,6 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // Calculate subtotal
     const kilo = parseFloat(weight);
     const subtotal = kilo * pricePerKg;
 
@@ -250,7 +298,7 @@ export async function POST(request: NextRequest) {
         quantity: kilo,
         price_per_unit: pricePerKg,
         subtotal: subtotal,
-        status: 'in_progress', // Start in work queue
+        status: 'in_progress',
         started_at: new Date().toISOString()
       })
       .select(`
@@ -275,6 +323,23 @@ export async function POST(request: NextRequest) {
 
     console.log('✅ [POST] Order successfully moved to work queue:', orderItem.id);
 
+    // 🔔 CREATE NOTIFICATION FOR ORDER CONFIRMATION
+    await createOrderNotification({
+      userId: orderItem.order.customer_id,
+      title: 'Order Confirmed! ✅',
+      body: `Your laundry order has been confirmed. Weight: ${kilo}kg. Total: ₱${subtotal.toFixed(2)}`,
+      payload: {
+        order_id: orderItem.order.id,
+        order_status: 'confirmed',
+        shop_name: orderItem.order.branch?.name,
+        branch_name: orderItem.order.branch?.address,
+        total_amount: subtotal,
+        weight: kilo,
+        price_per_kg: pricePerKg,
+        service_name: orderItem.order.service?.name
+      }
+    });
+
     return NextResponse.json({ 
       success: true,
       message: 'Order moved to work queue successfully',
@@ -294,7 +359,6 @@ export async function PATCH(request: NextRequest) {
   try {
     console.log('🔄 [PATCH] Starting order status update API');
     
-    // Authentication
     const supabaseAuth = await supabaseServer()
     const { data: { user }, error: userError } = await supabaseAuth.auth.getUser()
     
@@ -302,34 +366,17 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
     }
 
-    const { orderItemId, status } = await request.json();
+    const { orderItemId } = await request.json();
     
-    console.log('📦 [PATCH] Updating order item status:', { orderItemId, status });
+    console.log('📦 [PATCH] Updating order item status:', { orderItemId });
 
-    if (!orderItemId || !status) {
+    if (!orderItemId) {
       return NextResponse.json({ 
-        error: 'Missing required fields: orderItemId, status' 
+        error: 'Missing required field: orderItemId' 
       }, { status: 400 });
     }
 
-    // Validate status
-    const validStatuses = ['in_progress', 'ready', 'delivering', 'completed'];
-    if (!validStatuses.includes(status)) {
-      return NextResponse.json({ 
-        error: 'Invalid status. Must be one of: ' + validStatuses.join(', ') 
-      }, { status: 400 });
-    }
-
-    const updateData: any = {
-      status: status
-    };
-
-    // Set completed_at if marking as completed
-    if (status === 'completed') {
-      updateData.completed_at = new Date().toISOString();
-    }
-
-    // Get order item details first
+    // Get order item details first - use .maybeSingle() to handle empty results
     const { data: orderItem, error: fetchError } = await supabaseAdmin
       .from('order_items')
       .select(`
@@ -344,7 +391,7 @@ export async function PATCH(request: NextRequest) {
         )
       `)
       .eq('id', orderItemId)
-      .single();
+      .maybeSingle(); // Use maybeSingle instead of single
 
     if (fetchError) {
       console.error('❌ [PATCH] Error fetching order item:', fetchError);
@@ -353,7 +400,60 @@ export async function PATCH(request: NextRequest) {
       }, { status: 500 });
     }
 
-    // Update order item status in ORDER_ITEMS table (WORK QUEUE)
+    // Check if order item was found
+    if (!orderItem) {
+      console.log('❌ [PATCH] Order item not found, might be already completed:', orderItemId);
+      return NextResponse.json({ 
+        success: false,
+        message: 'Order item not found. It may have been already completed or deleted.',
+        orderItemId: orderItemId
+      });
+    }
+
+    const orderMethod = orderItem.order.method?.code;
+    const currentStatus = orderItem.status;
+    
+    console.log('🚚 Order details:', {
+      method: orderMethod,
+      currentStatus: currentStatus,
+      orderId: orderItem.order.id,
+      customer_id: orderItem.order.customer_id
+    });
+
+    // SMART STATUS TRANSITION LOGIC
+    let nextStatus: string;
+    
+    if (currentStatus === 'in_progress' || currentStatus === 'ready') {
+      if (orderMethod === 'delivery' || orderMethod === 'pickup') {
+        // For delivery/pickup: in_shop → delivering
+        nextStatus = 'delivering';
+      } else {
+        // For dropoff: in_shop → completed (direct to done)
+        nextStatus = 'completed';
+      }
+    } else if (currentStatus === 'delivering') {
+      // delivering → completed (final step for delivery/pickup)
+      nextStatus = 'completed';
+    } else {
+      nextStatus = currentStatus; // No change
+    }
+
+    console.log('🔄 Status transition:', {
+      from: currentStatus,
+      to: nextStatus,
+      method: orderMethod
+    });
+
+    const updateData: any = {
+      status: nextStatus,
+    };
+
+    // Set completed_at if marking as completed
+    if (nextStatus === 'completed') {
+      updateData.completed_at = new Date().toISOString();
+    }
+
+    // Update order item status in ORDER_ITEMS table
     const { data: updatedItem, error: updateError } = await supabaseAdmin
       .from('order_items')
       .update(updateData)
@@ -370,41 +470,81 @@ export async function PATCH(request: NextRequest) {
 
     console.log('✅ [PATCH] Order status updated successfully:', updatedItem.id);
 
-    // If status is completed, move to order_history and clean up
-    if (status === 'completed') {
+    // 🔔 CREATE NOTIFICATIONS BASED ON STATUS CHANGE
+    if (nextStatus === 'delivering') {
+      // Order is now being delivered
+      await createOrderNotification({
+        userId: orderItem.order.customer_id,
+        title: 'Order is Being Delivered! 🚚',
+        body: `Your laundry order is now out for delivery to ${orderItem.order.delivery_location || 'your location'}.`,
+        payload: {
+          order_id: orderItem.order.id,
+          order_status: 'delivering',
+          delivery_status: 'delivering',
+          shop_name: orderItem.order.branch?.name,
+          branch_name: orderItem.order.branch?.address,
+          delivery_location: orderItem.order.delivery_location
+        }
+      });
+    } else if (nextStatus === 'completed') {
       console.log('📚 Moving completed order to order_history');
       
       const order = orderItem.order;
       
-      // Insert into order_history
+      // Insert into order_history - USING EXACT SCHEMA FROM YOUR DATABASE
+      const historyData = {
+        shop_id: order.branch.shop_id,
+        branch_id: order.branch_id,
+        customer_name: order.customer_name || order.customer?.full_name || 'Customer',
+        customer_contact: order.customer_contact || null,
+        delivery_location: order.delivery_location || null,
+        method_id: order.method_id || null,
+        method_code: order.method?.code || null,
+        method_label: order.method?.label || null,
+        service_name: order.service?.name || 'Standard Service',
+        detergent_name: order.detergent?.name || null,
+        softener_name: order.softener?.name || null,
+        weight: orderItem.quantity,
+        price: orderItem.subtotal,
+        status: 'completed',
+        completed_at: new Date().toISOString(),
+        created_at: order.created_at || new Date().toISOString(),
+        customer_id: order.customer_id || null
+      };
+
+      console.log('📝 Inserting into order_history with exact schema match');
+
       const { error: historyError } = await supabaseAdmin
         .from('order_history')
-        .insert({
-          shop_id: order.branch.shop_id,
-          branch_id: order.branch_id,
-          customer_name: order.customer_name || order.customer?.full_name || 'Customer',
-          customer_contact: order.customer_contact,
-          delivery_location: order.delivery_location,
-          method_id: order.method_id,
-          method_code: order.method?.code,
-          method_label: order.method?.label,
-          service_name: order.service?.name || orderItem.service?.name,
-          detergent_name: order.detergent?.name,
-          softener_name: order.softener?.name,
-          weight: orderItem.quantity,
-          price: orderItem.subtotal,
-          status: 'completed',
-          completed_at: new Date().toISOString()
-        });
+        .insert(historyData);
 
       if (historyError) {
         console.error('❌ [PATCH] Error saving to order_history:', historyError);
-        // Don't fail the whole request, just log the error
+        return NextResponse.json({ 
+          error: 'Failed to save order to history: ' + historyError.message 
+        }, { status: 500 });
       } else {
         console.log('✅ [PATCH] Order saved to order_history');
+        
+        // 🔔 CREATE NOTIFICATION FOR ORDER COMPLETION
+        await createOrderNotification({
+          userId: order.customer_id,
+          title: 'Order Completed! 🎉',
+          body: `Your laundry order has been completed and is ready for ${order.method?.code === 'delivery' ? 'delivery' : 'pickup'}.`,
+          payload: {
+            order_id: order.id,
+            order_status: 'completed',
+            shop_name: order.branch?.name,
+            branch_name: order.branch?.address,
+            total_amount: orderItem.subtotal,
+            weight: orderItem.quantity,
+            price_per_kg: orderItem.price_per_unit,
+            service_name: order.service?.name
+          }
+        });
       }
 
-      // Delete from order_items (work queue)
+      // Delete from order_items (work queue) - ONLY after successful history insert
       const { error: deleteError } = await supabaseAdmin
         .from('order_items')
         .delete()
@@ -412,7 +552,9 @@ export async function PATCH(request: NextRequest) {
 
       if (deleteError) {
         console.error('❌ [PATCH] Error deleting from order_items:', deleteError);
-        // Don't fail the whole request, just log the error
+        return NextResponse.json({ 
+          error: 'Failed to clean up order items: ' + deleteError.message 
+        }, { status: 500 });
       } else {
         console.log('✅ [PATCH] Order removed from order_items');
       }
@@ -424,8 +566,7 @@ export async function PATCH(request: NextRequest) {
         .eq('id', order.id);
 
       if (deleteOrderError) {
-        console.error('❌ [PATCH] Error deleting from orders:', deleteOrderError);
-        // This might be expected if order was already deleted
+        console.log('ℹ️ Order already removed from orders table or delete failed:', deleteOrderError.message);
       } else {
         console.log('✅ [PATCH] Order removed from orders');
       }
@@ -433,8 +574,9 @@ export async function PATCH(request: NextRequest) {
 
     return NextResponse.json({ 
       success: true,
-      message: `Order status updated to ${status}`,
-      orderItem: updatedItem
+      message: `Order status updated to ${nextStatus}`,
+      orderItem: updatedItem,
+      nextStatus: nextStatus
     });
 
   } catch (error: any) {

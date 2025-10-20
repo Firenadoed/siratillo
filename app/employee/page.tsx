@@ -1,3 +1,4 @@
+// app/employee/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -6,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/lib/ui/card";
 import { Button } from "@/lib/ui/button";
 import { Input } from "@/lib/ui/input";
 import { Toaster, toast } from "sonner";
-import { ChevronDown, ChevronUp, Clock, CheckCircle, Truck, AlertCircle, LogOut, MapPin, User } from "lucide-react";
+import { ChevronDown, ChevronUp, Clock, CheckCircle, Truck, AlertCircle, LogOut, MapPin, User, Loader2 } from "lucide-react";
 
 // Updated Types
 type Order = {
@@ -32,10 +33,12 @@ type Order = {
 // Compact Order Card Component
 function CompactOrderCard({ 
   order, 
-  action 
+  action,
+  isProcessing = false
 }: { 
   order: Order; 
   action?: React.ReactNode;
+  isProcessing?: boolean;
 }) {
   const getStatusIcon = (status: Order["status"]) => {
     switch (status) {
@@ -58,13 +61,16 @@ function CompactOrderCard({
   };
 
   return (
-    <Card className={`${getCardColor(order.status)} border-l-4 border-l-blue-500 hover:shadow-md transition-all`}>
+    <Card className={`${getCardColor(order.status)} border-l-4 border-l-blue-500 hover:shadow-md transition-all ${isProcessing ? 'opacity-60' : ''}`}>
       <CardContent className="p-4">
         <div className="flex items-start justify-between">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-2">
               {getStatusIcon(order.status)}
               <h4 className="font-semibold text-gray-900 truncate">{order.customer_name}</h4>
+              {isProcessing && (
+                <Loader2 className="h-3 w-3 text-blue-600 animate-spin" />
+              )}
             </div>
             <div className="text-sm text-gray-600 space-y-1">
               <p>Service: {order.services?.name || "Standard"}</p>
@@ -88,11 +94,13 @@ function CompactOrderCard({
 function OrderCard({ 
   order, 
   onStatusChange,
-  showDetails = true 
+  showDetails = true,
+  isProcessing = false
 }: { 
   order: Order; 
   onStatusChange?: (order: Order) => void;
   showDetails?: boolean;
+  isProcessing?: boolean;
 }) {
   const getStatusColor = (status: Order["status"]) => {
     switch (status) {
@@ -115,23 +123,35 @@ function OrderCard({
   };
 
   const getNextAction = (order: Order) => {
-    if (order.status === "in_shop" && order.method === "dropoff") return "Mark as Done";
-    if (order.status === "in_shop" && order.method === "delivery") return "Start Delivery";
-    if (order.status === "delivering") return "Mark as Delivered";
+    if (order.status === "in_shop") {
+      if (order.method === "dropoff") {
+        return "Mark as Done";
+      } else {
+        return "Start Delivery";
+      }
+    }
+    if (order.status === "delivering") {
+      return "Mark as Delivered";
+    }
     return "Update Status";
   };
 
   return (
-    <Card className={`${getCardColor(order.status)} hover:shadow-lg transition-all border-2`}>
+    <Card className={`${getCardColor(order.status)} hover:shadow-lg transition-all border-2 ${isProcessing ? 'opacity-60' : ''}`}>
       <CardContent className="p-5">
         <div className="flex justify-between items-start mb-4">
           <div>
             <h3 className="font-bold text-lg text-gray-900">{order.customer_name}</h3>
             <p className="text-sm text-gray-600">Order #{order.id.slice(-8)}</p>
           </div>
-          <span className={`px-3 py-1.5 rounded-full text-xs font-semibold border-2 ${getStatusColor(order.status)} capitalize`}>
-            {order.status.replace('_', ' ')}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className={`px-3 py-1.5 rounded-full text-xs font-semibold border-2 ${getStatusColor(order.status)} capitalize`}>
+              {order.status.replace('_', ' ')}
+            </span>
+            {isProcessing && (
+              <Loader2 className="h-4 w-4 text-blue-600 animate-spin" />
+            )}
+          </div>
         </div>
 
         {showDetails && (
@@ -186,10 +206,18 @@ function OrderCard({
         {onStatusChange && order.status !== "pending" && order.status !== "done" && (
           <Button
             onClick={() => onStatusChange(order)}
+            disabled={isProcessing}
             className="w-full mt-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold"
             size="sm"
           >
-            {getNextAction(order)}
+            {isProcessing ? (
+              <>
+                <Loader2 className="h-3 w-3 animate-spin mr-2" />
+                Processing...
+              </>
+            ) : (
+              getNextAction(order)
+            )}
           </Button>
         )}
       </CardContent>
@@ -225,6 +253,22 @@ function CollapsibleSection({
   );
 }
 
+// Temporary debug component - remove after fixing
+function DebugInfo({ processingOrders }: { processingOrders: Set<string> }) {
+  if (processingOrders.size === 0) return null;
+  
+  return (
+    <div className="fixed bottom-4 right-4 bg-red-100 border border-red-300 p-2 rounded text-xs z-50">
+      <strong>Processing Orders:</strong>
+      <div>
+        {Array.from(processingOrders).map(id => (
+          <div key={id}>🔄 {id.slice(-8)}</div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function EmployeeContent() {
   const router = useRouter();
 
@@ -244,9 +288,29 @@ function EmployeeContent() {
   // Search states
   const [searchOngoing, setSearchOngoing] = useState("");
 
-  // ==============================
-  // 🔐 AUTHENTICATION CHECK FIRST
-  // ==============================
+  // 🔄 ADD: Processing states for button timeouts
+  const [processingOrders, setProcessingOrders] = useState<Set<string>>(new Set());
+  const [savingWeight, setSavingWeight] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Helper functions for processing management
+  const addToProcessing = (orderId: string) => {
+    setProcessingOrders(prev => new Set([...prev, orderId]));
+  };
+
+  const removeFromProcessing = (orderId: string) => {
+    setProcessingOrders(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(orderId);
+      return newSet;
+    });
+  };
+
+  const isProcessing = (orderId: string) => {
+    return processingOrders.has(orderId);
+  };
+
+  // Authentication Check
   useEffect(() => {
     const checkAuth = async () => {
       try {
@@ -291,10 +355,8 @@ function EmployeeContent() {
     checkAuth();
   }, [router]);
 
-  // ==============================
-  // 📊 FETCH ORDERS WHEN AUTHORIZED
-  // ==============================
-  useEffect(() => {
+  // Fetch Orders When Authorized - IMPROVED with better error handling
+  const fetchOrders = async () => {
     if (!isAuthorized || !currentShopId) {
       console.log("Skipping order fetch - not ready:", { 
         isAuthorized, 
@@ -303,60 +365,61 @@ function EmployeeContent() {
       return;
     }
 
-    const fetchOrders = async () => {
-      try {
-        console.log("📦 Fetching orders for branch:", currentShopId);
-        
-        const response = await fetch(`/api/employee/orders?branch_id=${currentShopId}`, {
-          credentials: 'include'
-        });
-        
-        if (!response.ok) {
-          throw new Error(`API error: ${response.status}`);
-        }
-        
-        const { pendingOrders, ongoingOrders, orderHistory, error } = await response.json();
-
-        if (error) {
-          console.error("❌ Error fetching orders:", error);
-          toast.error("Failed to load orders");
-          return;
-        }
-
-        console.log("✅ Orders fetched:", { 
-          pending: pendingOrders?.length || 0, 
-          ongoing: ongoingOrders?.length || 0, 
-          history: orderHistory?.length || 0 
-        });
-        
-        // Combine for display
-        const allOrders = [
-          ...(pendingOrders || []),
-          ...(ongoingOrders || []), 
-          ...(orderHistory || [])
-        ];
-        setOrders(allOrders);
-        
-      } catch (error) {
-        console.error("💥 Error in fetchOrders:", error);
-        toast.error("Error loading orders: " + (error as Error).message);
+    try {
+      setRefreshing(true);
+      console.log("📦 Fetching orders for branch:", currentShopId);
+      
+      const response = await fetch(`/api/employee/orders?branch_id=${currentShopId}`, {
+        credentials: 'include',
+        cache: 'no-store' // Prevent caching
+      });
+      
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
       }
-    };
+      
+      const { pendingOrders, ongoingOrders, orderHistory, error } = await response.json();
 
+      if (error) {
+        console.error("❌ Error fetching orders:", error);
+        toast.error("Failed to load orders");
+        return;
+      }
+
+      console.log("✅ Orders fetched:", { 
+        pending: pendingOrders?.length || 0, 
+        ongoing: ongoingOrders?.length || 0, 
+        history: orderHistory?.length || 0 
+      });
+      
+      // Combine for display
+      const allOrders = [
+        ...(pendingOrders || []),
+        ...(ongoingOrders || []), 
+        ...(orderHistory || [])
+      ];
+      setOrders(allOrders);
+      
+    } catch (error) {
+      console.error("💥 Error in fetchOrders:", error);
+      toast.error("Error loading orders: " + (error as Error).message);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
     fetchOrders();
 
     // Set up polling for real-time updates
-    const interval = setInterval(fetchOrders, 30000); // Refresh every 30 seconds
+    const interval = setInterval(fetchOrders, 15000); // Reduced to 15 seconds
 
     return () => {
       clearInterval(interval);
     };
-
   }, [isAuthorized, currentShopId]);
 
-  // ==============================
-  // 📈 ORDER FILTERING & CALCULATIONS
-  // ==============================
+  // Order Filtering & Calculations
   const { pendingOrders, ongoingOrders, orderHistory } = useMemo(() => {
     if (orders.length === 0) {
       return { pendingOrders: [], ongoingOrders: [], orderHistory: [] };
@@ -382,9 +445,7 @@ function EmployeeContent() {
     );
   }, [ongoingOrders, searchOngoing]);
 
-  // ==============================
-  // 🎯 ORDER MANAGEMENT FUNCTIONS
-  // ==============================
+  // Order Management Functions
   const handleLogout = async () => {
     try {
       const response = await fetch('/api/auth/logout', { method: 'POST' });
@@ -399,19 +460,45 @@ function EmployeeContent() {
     }
   };
 
+  // 🔄 FIXED: handleConfirm with better timeout management
   const handleConfirm = (order: Order) => {
+    if (isProcessing(order.id)) {
+      console.log('🛑 Order already being processed:', order.id);
+      return;
+    }
+
+    addToProcessing(order.id);
     setCurrentOrder(order);
     setShowModal(true);
+    
+    // Set timeout to clear processing state if modal stays open too long
+    const timeoutId = setTimeout(() => {
+      if (showModal && currentOrder?.id === order.id) {
+        console.log('🕒 Auto-clearing processing state for modal order:', order.id);
+        removeFromProcessing(order.id);
+      }
+    }, 15000);
+
+    // Cleanup function
+    return () => clearTimeout(timeoutId);
   };
 
+  // 🔄 FIXED: handleSaveWeight with immediate feedback
   const handleSaveWeight = async () => {
     if (!currentOrder) return;
     
+    if (savingWeight) {
+      toast.error('Already saving weight...');
+      return;
+    }
+
     const kilo = parseFloat(weight);
     if (isNaN(kilo) || kilo <= 0) {
       toast.error("Invalid weight. Please enter a valid number.");
       return;
     }
+
+    setSavingWeight(true);
 
     try {
       const pricePerKg = currentOrder.services?.price ?? 0;
@@ -443,7 +530,6 @@ function EmployeeContent() {
         }),
       });
 
-      // Handle non-JSON responses
       const responseText = await response.text();
       let result;
       try {
@@ -463,57 +549,47 @@ function EmployeeContent() {
         throw new Error(result.error || 'Failed to process order');
       }
 
-      // Success - close modal and reset
+      // ✅ SUCCESS: Update UI immediately instead of reloading
+      toast.success(result.message || "Order moved to work queue!");
+      
+      // Remove from pending orders immediately
+      setOrders(prev => prev.filter(order => order.id !== currentOrder.id));
+      
+      // Close modal and reset
       setShowModal(false);
       setWeight("");
       setCurrentOrder(null);
-      toast.success(result.message || "Order moved to work queue!");
-      
-      // Refresh orders after a short delay
-      setTimeout(() => {
-        window.location.reload();
-      }, 1000);
+      removeFromProcessing(currentOrder.id);
       
     } catch (error) {
       console.error("Error saving weight:", error);
       toast.error("An error occurred: " + (error as Error).message);
+      removeFromProcessing(currentOrder.id);
+    } finally {
+      setSavingWeight(false);
     }
   };
 
+  // 🔄 FIXED: handleStatusChange with proper state cleanup
   const handleStatusChange = async (order: Order) => {
+    // Use order_item_id if available, otherwise fall back to order.id
+    const orderItemId = order.order_item_id || order.id;
+    
+    if (isProcessing(orderItemId)) {
+      console.log('🛑 Status change already in progress for:', orderItemId);
+      return;
+    }
+
+    addToProcessing(orderItemId);
+
+    console.log("🔄 Updating order status for:", {
+      orderItemId: orderItemId,
+      currentStatus: order.status,
+      method: order.method
+    });
+
     try {
-      if (!order.order_item_id) {
-        toast.error("Order item ID missing - cannot update status");
-        return;
-      }
-
-      let databaseStatus;
-
-      // Map frontend status to database status
-      if (order.method === "dropoff" && order.status === "in_shop") {
-        // Dropoff: in_shop → completed (moves to history)
-        databaseStatus = 'completed';
-      } else if (order.method === "delivery") {
-        if (order.status === "in_shop") {
-          // Delivery: in_shop → delivering
-          databaseStatus = 'delivering';
-        } else if (order.status === "delivering") {
-          // Delivery: delivering → completed (moves to history)
-          databaseStatus = 'completed';
-        }
-      }
-
-      if (!databaseStatus) {
-        toast.error("Invalid status transition");
-        return;
-      }
-
-      console.log("🔄 Updating order status:", {
-        orderItemId: order.order_item_id,
-        frontendStatus: order.status,
-        databaseStatus
-      });
-
+      // Send the correct parameter that backend expects
       const response = await fetch('/api/employee/orders', {
         method: 'PATCH',
         headers: {
@@ -521,12 +597,10 @@ function EmployeeContent() {
         },
         credentials: 'include',
         body: JSON.stringify({
-          orderItemId: order.order_item_id,
-          status: databaseStatus
+          orderItemId: orderItemId
         }),
       });
 
-      // Handle non-JSON responses
       const responseText = await response.text();
       let result;
       try {
@@ -548,22 +622,42 @@ function EmployeeContent() {
 
       toast.success(result.message || `Order status updated successfully!`);
       
-      // Refresh orders after a short delay
-      setTimeout(() => {
-        window.location.reload();
-      }, 1000);
+      // ✅ Force refresh orders to get updated status
+      await fetchOrders();
+      
+      // ✅ CRITICAL: Remove from processing after successful update
+      removeFromProcessing(orderItemId);
       
     } catch (error) {
       console.error("Error changing status:", error);
       toast.error("Error updating status: " + (error as Error).message);
+      
+      // Ensure processing state is cleared on error
+      removeFromProcessing(orderItemId);
     }
   };
 
-  // ==============================
-  // 🎯 RENDER LOGIC
-  // ==============================
-  
-  // Show loading while checking auth OR fetching data
+  // Add modal close handler
+  const handleModalClose = () => {
+    if (currentOrder) {
+      removeFromProcessing(currentOrder.id);
+    }
+    setShowModal(false);
+    setWeight("");
+    setCurrentOrder(null);
+  };
+
+  // Add cleanup effect for modal
+  useEffect(() => {
+    return () => {
+      // Clean up any processing states when component unmounts
+      if (showModal && currentOrder) {
+        removeFromProcessing(currentOrder.id);
+      }
+    };
+  }, [showModal, currentOrder]);
+
+  // Render Logic
   if (loading || !isAuthorized) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-blue-50 to-sky-100">
@@ -577,7 +671,6 @@ function EmployeeContent() {
     );
   }
 
-  // Show empty state if no shop assigned
   if (!currentShopId) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-blue-50 to-sky-100">
@@ -626,14 +719,29 @@ function EmployeeContent() {
                 </div>
               </div>
               
-              {/* Logout Button */}
-              <Button
-                onClick={handleLogout}
-                className="bg-white text-blue-600 hover:bg-blue-50 font-semibold px-4 py-2 text-sm sm:text-base"
-              >
-                <LogOut className="h-4 w-4 mr-2" />
-                Logout
-              </Button>
+              {/* Refresh Button */}
+              <div className="flex gap-2">
+                <Button
+                  onClick={fetchOrders}
+                  disabled={refreshing}
+                  variant="outline"
+                  className="bg-white/20 text-white hover:bg-white/30 border-white"
+                  size="sm"
+                >
+                  {refreshing ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    "Refresh"
+                  )}
+                </Button>
+                <Button
+                  onClick={handleLogout}
+                  className="bg-white text-blue-600 hover:bg-blue-50 font-semibold px-4 py-2 text-sm sm:text-base"
+                >
+                  <LogOut className="h-4 w-4 mr-2" />
+                  Logout
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -674,13 +782,22 @@ function EmployeeContent() {
                       <CompactOrderCard 
                         key={order.id} 
                         order={order}
+                        isProcessing={isProcessing(order.id)}
                         action={
                           <Button 
                             size="sm" 
                             onClick={() => handleConfirm(order)}
+                            disabled={isProcessing(order.id)}
                             className="bg-blue-600 hover:bg-blue-700 text-white font-semibold"
                           >
-                            Confirm Weight
+                            {isProcessing(order.id) ? (
+                              <>
+                                <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                                Processing...
+                              </>
+                            ) : (
+                              'Confirm Weight'
+                            )}
                           </Button>
                         }
                       />
@@ -731,6 +848,7 @@ function EmployeeContent() {
                         key={order.order_item_id || order.id}
                         order={order}
                         onStatusChange={handleStatusChange}
+                        isProcessing={isProcessing(order.order_item_id || order.id)}
                         showDetails={true}
                       />
                     ))}
@@ -805,6 +923,7 @@ function EmployeeContent() {
                   placeholder="Enter weight in kilograms"
                   className="w-full border-blue-300 focus:border-blue-500"
                   autoFocus
+                  disabled={savingWeight}
                 />
               </div>
               
@@ -823,31 +942,37 @@ function EmployeeContent() {
             <div className="flex justify-end gap-3 mt-6">
               <Button 
                 variant="outline" 
-                onClick={() => {
-                  setShowModal(false);
-                  setWeight("");
-                  setCurrentOrder(null);
-                }}
+                onClick={handleModalClose}
+                disabled={savingWeight}
                 className="border-gray-400 text-gray-700 hover:bg-gray-50"
               >
                 Cancel
               </Button>
               <Button
                 onClick={handleSaveWeight}
-                disabled={!weight || isNaN(parseFloat(weight)) || parseFloat(weight) <= 0}
+                disabled={!weight || isNaN(parseFloat(weight)) || parseFloat(weight) <= 0 || savingWeight}
                 className="bg-blue-600 hover:bg-blue-700 text-white font-semibold"
               >
-                Save & Move to Work Queue
+                {savingWeight ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    Saving...
+                  </>
+                ) : (
+                  'Save & Move to Work Queue'
+                )}
               </Button>
             </div>
           </div>
         </div>
       )}
+
+      {/* Debug Info - Remove after fixing */}
+      <DebugInfo processingOrders={processingOrders} />
     </div>
   );
 }
 
-// Main export
 export default function EmployeePage() {
   return <EmployeeContent />;
 }

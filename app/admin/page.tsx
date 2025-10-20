@@ -448,236 +448,308 @@ export default function ManageShops() {
   }
 
   return (
-    <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-6 md:space-y-8">
-      <Toaster position="top-right" richColors />
-      <header className="bg-purple-700 text-white py-3 px-4 md:px-6 rounded-md shadow-md flex flex-col md:flex-row justify-between items-center gap-3">
-        <h1 className="text-xl md:text-2xl font-bold text-center md:text-left truncate">Superadmin Dashboard</h1>
-        <Button onClick={handleLogout} className="bg-red-500 hover:bg-red-600 w-full md:w-auto">Logout</Button>
+    <div className="p-2 sm:p-4 md:p-6 max-w-7xl mx-auto space-y-4 sm:space-y-6">
+      <Toaster position="top-center" richColors />
+      
+      {/* Header - Mobile Optimized */}
+      <header className="bg-purple-700 text-white py-3 px-3 sm:px-4 rounded-lg shadow-md">
+        <div className="flex flex-col xs:flex-row justify-between items-center gap-2">
+          <h1 className="text-base xs:text-lg sm:text-xl md:text-2xl font-bold text-center xs:text-left break-words max-w-full">
+            Superadmin Dashboard
+          </h1>
+          <Button 
+            onClick={handleLogout} 
+            className="bg-red-500 hover:bg-red-600 w-full xs:w-auto text-xs xs:text-sm py-2 h-9 min-h-9"
+          >
+            Logout
+          </Button>
+        </div>
       </header>
 
       {/* =================== Shops Card =================== */}
-      <Card>
-        <CardHeader className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 flex-wrap">
-          <CardTitle className="text-xl font-semibold">Laundry Shops</CardTitle>
-          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto flex-wrap">
-            <Input 
-              placeholder="Search shop..." 
-              value={searchShop} 
-              onChange={(e) => setSearchShop(e.target.value)} 
-              className="flex-1 min-w-[200px]" 
-            />
-            <Button 
-              className="w-full sm:w-auto" 
-              onClick={() => { 
-                resetShopForm();
-                setOpenAddShop(true); 
-              }}
-            >
-              + Add Shop
-            </Button>
+      <Card className="w-full overflow-hidden">
+        <CardHeader className="pb-3 px-3 sm:px-6">
+          <div className="flex flex-col space-y-3 sm:space-y-0 sm:flex-row sm:justify-between sm:items-center">
+            <CardTitle className="text-base xs:text-lg sm:text-xl font-semibold break-words">Laundry Shops</CardTitle>
+            <div className="flex flex-col xs:flex-row gap-2 w-full sm:w-auto">
+              <Input 
+                placeholder="Search shop..." 
+                value={searchShop} 
+                onChange={(e) => setSearchShop(e.target.value)} 
+                className="flex-1 min-w-0 text-xs xs:text-sm sm:text-base h-9" 
+              />
+              <Button 
+                className="w-full xs:w-auto text-xs xs:text-sm h-9 min-h-9 whitespace-nowrap"
+                onClick={() => { 
+                  resetShopForm();
+                  setOpenAddShop(true); 
+                }}
+              >
+                + Add Shop
+              </Button>
+            </div>
           </div>
         </CardHeader>
-        <CardContent className="flex flex-col gap-4">
+        <CardContent className="pt-0 px-3 sm:px-6">
           {filteredShops.length === 0 ? (
-            <p className="text-center text-gray-500 py-4">No shops found</p>
+            <p className="text-center text-gray-500 py-6 text-xs xs:text-sm">No shops found</p>
           ) : (
-            filteredShops.map((shop) => (
-              <div key={shop.id} className="border rounded-md p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 flex-wrap">
-                <div className="flex-1 min-w-0">
-                  <p className="font-semibold truncate">{shop.name}</p>
-                  {shop.description && (
-                    <p className="text-sm text-gray-600 mt-1">{shop.description}</p>
-                  )}
-                  {shop.branches && shop.branches.length > 0 ? (
-                    shop.branches.map((b) => (
-                      <div key={b.id} className="mt-2 border p-2 rounded-md flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 flex-wrap">
-                        <span className="truncate">{b.name} ({b.address})</span>
-                        <div className="flex flex-wrap gap-1 mt-1 sm:mt-0">
-                          <Button 
-                            size="sm" 
-                            onClick={() => { 
-                              setEditingBranch(b); 
-                              setBranchName(b.name); 
-                              setBranchAddress(b.address); 
-                              setBranchLocation([b.lat || 9.308, b.lng || 123.308]); 
-                              setOpenAddBranch({ open: true, shopId: shop.id }); 
-                            }}
-                          >
-                            Edit
-                          </Button>
-                          <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                              <Button 
-                                size="sm" 
-                                variant="destructive"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                Delete
-                              </Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                              <AlertDialogHeader>
-                                <AlertDialogTitle>Delete Branch?</AlertDialogTitle>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel onClick={(e) => e.stopPropagation()}>Cancel</AlertDialogCancel>
-                                <AlertDialogAction 
-                                  onClick={(e) => { 
-                                    e.stopPropagation();
-                                    setDeleteBranchId(b.id); 
-                                    handleDeleteBranch(); 
-                                  }}
-                                >
-                                  Delete
-                                </AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-sm text-gray-500 mt-2">No branches</p>
-                  )}
-                </div>
-                <div className="flex flex-wrap gap-1 mt-2 sm:mt-0">
-                  <Button 
-                    size="sm" 
-                    onClick={(e) => { 
-                      e.stopPropagation();
-                      setEditingShop(shop); 
-                      setNewShopName(shop.name); 
-                      setNewShopAddress(shop.description || ""); 
-                      setOpenAddShop(true); 
-                    }}
-                  >
-                    Edit
-                  </Button>
-                  <AlertDialog>
-                    <AlertDialogTrigger asChild>
+            <div className="space-y-3">
+              {filteredShops.map((shop) => (
+                <div key={shop.id} className="border border-gray-200 rounded-lg p-3 bg-white shadow-sm">
+                  {/* Shop Header */}
+                  <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2 mb-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-sm xs:text-base sm:text-lg break-words">{shop.name}</p>
+                      {shop.description && (
+                        <p className="text-xs text-gray-600 mt-1 break-words">{shop.description}</p>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-1 justify-start">
                       <Button 
                         size="sm" 
-                        variant="destructive"
-                        onClick={(e) => e.stopPropagation()}
+                        variant="outline"
+                        className="text-xs h-8 px-2 min-w-[60px] flex-1 xs:flex-none"
+                        onClick={(e) => { 
+                          e.stopPropagation();
+                          setEditingShop(shop); 
+                          setNewShopName(shop.name); 
+                          setNewShopAddress(shop.description || ""); 
+                          setOpenAddShop(true); 
+                        }}
                       >
-                        Delete
+                        Edit
                       </Button>
-                    </AlertDialogTrigger>
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>Delete Shop?</AlertDialogTitle>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel onClick={(e) => e.stopPropagation()}>Cancel</AlertDialogCancel>
-                        <AlertDialogAction 
-                          onClick={(e) => { 
-                            e.stopPropagation();
-                            setDeleteShopId(shop.id); 
-                            handleDeleteShop(); 
-                          }}
-                        >
-                          Delete
-                        </AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
-                  <Button 
-                    size="sm" 
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setOpenAddBranch({ open: true, shopId: shop.id });
-                    }}
-                  >
-                    + Add Branch
-                  </Button>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button 
+                            size="sm" 
+                            variant="destructive"
+                            className="text-xs h-8 px-2 min-w-[60px] flex-1 xs:flex-none"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            Delete
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent className="max-w-[90vw] sm:max-w-md rounded-lg mx-2">
+                          <AlertDialogHeader>
+                            <AlertDialogTitle className="text-sm xs:text-base sm:text-lg text-center sm:text-left">
+                              Delete Shop?
+                            </AlertDialogTitle>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter className="flex flex-row gap-2 sm:gap-0">
+                            <AlertDialogCancel 
+                              className="flex-1 text-xs xs:text-sm h-9 min-h-9"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              Cancel
+                            </AlertDialogCancel>
+                            <AlertDialogAction 
+                              className="flex-1 text-xs xs:text-sm h-9 min-h-9 bg-red-600 hover:bg-red-700"
+                              onClick={(e) => { 
+                                e.stopPropagation();
+                                setDeleteShopId(shop.id); 
+                                handleDeleteShop(); 
+                              }}
+                            >
+                              Delete
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                      <Button 
+                        size="sm"
+                        className="text-xs h-8 px-2 min-w-[80px] flex-1 xs:flex-none bg-green-600 hover:bg-green-700 whitespace-nowrap"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setOpenAddBranch({ open: true, shopId: shop.id });
+                        }}
+                      >
+                        + Branch
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Branches List */}
+                  <div className="mt-3 border-t pt-3">
+                    <p className="text-xs xs:text-sm font-medium text-gray-700 mb-2">Branches:</p>
+                    {shop.branches && shop.branches.length > 0 ? (
+                      <div className="space-y-2 max-h-40 overflow-y-auto">
+                        {shop.branches.map((b) => (
+                          <div key={b.id} className="border border-gray-100 rounded-md p-2 bg-gray-50">
+                            <div className="flex flex-col xs:flex-row xs:justify-between xs:items-center gap-2">
+                              <div className="flex-1 min-w-0">
+                                <p className="font-medium text-xs xs:text-sm break-words">{b.name}</p>
+                                <p className="text-xs text-gray-600 break-words">{b.address}</p>
+                              </div>
+                              <div className="flex flex-wrap gap-1 justify-start">
+                                <Button 
+                                  size="sm" 
+                                  variant="outline"
+                                  className="text-xs h-7 px-2 min-w-[50px]"
+                                  onClick={() => { 
+                                    setEditingBranch(b); 
+                                    setBranchName(b.name); 
+                                    setBranchAddress(b.address); 
+                                    setBranchLocation([b.lat || 9.308, b.lng || 123.308]); 
+                                    setOpenAddBranch({ open: true, shopId: shop.id }); 
+                                  }}
+                                >
+                                  Edit
+                                </Button>
+                                <AlertDialog>
+                                  <AlertDialogTrigger asChild>
+                                    <Button 
+                                      size="sm" 
+                                      variant="destructive"
+                                      className="text-xs h-7 px-2 min-w-[50px]"
+                                      onClick={(e) => e.stopPropagation()}
+                                    >
+                                      Delete
+                                    </Button>
+                                  </AlertDialogTrigger>
+                                  <AlertDialogContent className="max-w-[90vw] sm:max-w-md rounded-lg mx-2">
+                                    <AlertDialogHeader>
+                                      <AlertDialogTitle className="text-sm xs:text-base sm:text-lg text-center sm:text-left">
+                                        Delete Branch?
+                                      </AlertDialogTitle>
+                                    </AlertDialogHeader>
+                                    <AlertDialogFooter className="flex flex-row gap-2 sm:gap-0">
+                                      <AlertDialogCancel 
+                                        className="flex-1 text-xs xs:text-sm h-9 min-h-9"
+                                        onClick={(e) => e.stopPropagation()}
+                                      >
+                                        Cancel
+                                      </AlertDialogCancel>
+                                      <AlertDialogAction 
+                                        className="flex-1 text-xs xs:text-sm h-9 min-h-9 bg-red-600 hover:bg-red-700"
+                                        onClick={(e) => { 
+                                          e.stopPropagation();
+                                          setDeleteBranchId(b.id); 
+                                          handleDeleteBranch(); 
+                                        }}
+                                      >
+                                        Delete
+                                      </AlertDialogAction>
+                                    </AlertDialogFooter>
+                                  </AlertDialogContent>
+                                </AlertDialog>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-gray-500 text-center py-2">No branches</p>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))
+              ))}
+            </div>
           )}
         </CardContent>
       </Card>
 
       {/* =================== Owners Card =================== */}
-      <Card>
-        <CardHeader className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 flex-wrap">
-          <CardTitle className="text-xl font-semibold">Owners</CardTitle>
-          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto flex-wrap">
-            <Input 
-              placeholder="Search owner..." 
-              value={searchOwner} 
-              onChange={(e) => setSearchOwner(e.target.value)} 
-              className="flex-1 min-w-[200px]" 
-            />
-            <Button 
-              className="w-full sm:w-auto" 
-              onClick={() => { 
-                resetOwnerForm();
-                setOpenAddOwner(true); 
-              }}
-            >
-              + Add Owner
-            </Button>
+      <Card className="w-full overflow-hidden">
+        <CardHeader className="pb-3 px-3 sm:px-6">
+          <div className="flex flex-col space-y-3 sm:space-y-0 sm:flex-row sm:justify-between sm:items-center">
+            <CardTitle className="text-base xs:text-lg sm:text-xl font-semibold break-words">Owners</CardTitle>
+            <div className="flex flex-col xs:flex-row gap-2 w-full sm:w-auto">
+              <Input 
+                placeholder="Search owner..." 
+                value={searchOwner} 
+                onChange={(e) => setSearchOwner(e.target.value)} 
+                className="flex-1 min-w-0 text-xs xs:text-sm sm:text-base h-9" 
+              />
+              <Button 
+                className="w-full xs:w-auto text-xs xs:text-sm h-9 min-h-9 whitespace-nowrap"
+                onClick={() => { 
+                  resetOwnerForm();
+                  setOpenAddOwner(true); 
+                }}
+              >
+                + Add Owner
+              </Button>
+            </div>
           </div>
         </CardHeader>
-        <CardContent className="flex flex-col gap-4">
+        <CardContent className="pt-0 px-3 sm:px-6">
           {filteredOwners.length === 0 ? (
-            <p className="text-center text-gray-500 py-4">No owners found</p>
+            <p className="text-center text-gray-500 py-6 text-xs xs:text-sm">No owners found</p>
           ) : (
-            filteredOwners.map((owner) => {
-              const shop = shops.find((s) => s.id === owner.shop_id);
-              return (
-                <div key={owner.id} className="border rounded-md p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 flex-wrap">
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold truncate">{owner.full_name}</p>
-                    <p className="text-sm text-gray-600 truncate">{owner.email}</p>
-                    <p className="text-sm text-gray-600 truncate">Shop: {shop?.name || "Not assigned"}</p>
-                  </div>
-                  <div className="flex flex-wrap gap-1 mt-2 sm:mt-0">
-                    <Button 
-                      size="sm" 
-                      onClick={(e) => { 
-                        e.stopPropagation();
-                        setEditingOwner(owner); 
-                        setNewOwnerName(owner.full_name); 
-                        setNewOwnerEmail(owner.email); 
-                        setNewOwnerShop(owner.shop_id); 
-                        setOpenAddOwner(true); 
-                      }}
-                    >
-                      Edit
-                    </Button>
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
+            <div className="space-y-3">
+              {filteredOwners.map((owner) => {
+                const shop = shops.find((s) => s.id === owner.shop_id);
+                return (
+                  <div key={owner.id} className="border border-gray-200 rounded-lg p-3 bg-white shadow-sm">
+                    <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-sm xs:text-base break-words">{owner.full_name}</p>
+                        <p className="text-xs text-gray-600 break-words mt-1">{owner.email}</p>
+                        <p className="text-xs text-gray-700 mt-1">
+                          Shop: <span className="font-medium break-words">{shop?.name || "Not assigned"}</span>
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-1 justify-start mt-2 sm:mt-0">
                         <Button 
                           size="sm" 
-                          variant="destructive"
-                          onClick={(e) => e.stopPropagation()}
+                          variant="outline"
+                          className="text-xs h-8 px-2 min-w-[60px] flex-1 xs:flex-none"
+                          onClick={(e) => { 
+                            e.stopPropagation();
+                            setEditingOwner(owner); 
+                            setNewOwnerName(owner.full_name); 
+                            setNewOwnerEmail(owner.email); 
+                            setNewOwnerShop(owner.shop_id); 
+                            setOpenAddOwner(true); 
+                          }}
                         >
-                          Delete
+                          Edit
                         </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>Delete Owner?</AlertDialogTitle>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel onClick={(e) => e.stopPropagation()}>Cancel</AlertDialogCancel>
-                          <AlertDialogAction 
-                            onClick={(e) => { 
-                              e.stopPropagation();
-                              setDeleteOwnerId(owner.id); 
-                              handleDeleteOwner(); 
-                            }}
-                          >
-                            Delete
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button 
+                              size="sm" 
+                              variant="destructive"
+                              className="text-xs h-8 px-2 min-w-[60px] flex-1 xs:flex-none"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              Delete
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent className="max-w-[90vw] sm:max-w-md rounded-lg mx-2">
+                            <AlertDialogHeader>
+                              <AlertDialogTitle className="text-sm xs:text-base sm:text-lg text-center sm:text-left">
+                                Delete Owner?
+                              </AlertDialogTitle>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter className="flex flex-row gap-2 sm:gap-0">
+                              <AlertDialogCancel 
+                                className="flex-1 text-xs xs:text-sm h-9 min-h-9"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                Cancel
+                              </AlertDialogCancel>
+                              <AlertDialogAction 
+                                className="flex-1 text-xs xs:text-sm h-9 min-h-9 bg-red-600 hover:bg-red-700"
+                                onClick={(e) => { 
+                                  e.stopPropagation();
+                                  setDeleteOwnerId(owner.id); 
+                                  handleDeleteOwner(); 
+                                }}
+                              >
+                                Delete
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              );
-            })
+                );
+              })}
+            </div>
           )}
         </CardContent>
       </Card>
@@ -687,31 +759,36 @@ export default function ManageShops() {
         if (!open) resetShopForm();
         setOpenAddShop(open);
       }}>
-        <DialogContent>
+        <DialogContent className="max-w-[95vw] sm:max-w-md rounded-lg mx-2">
           <DialogHeader>
-            <DialogTitle>{editingShop ? "Edit Shop" : "Add Shop"}</DialogTitle>
+            <DialogTitle className="text-base xs:text-lg sm:text-xl text-center sm:text-left">
+              {editingShop ? "Edit Shop" : "Add Shop"}
+            </DialogTitle>
           </DialogHeader>
           <form onSubmit={(e) => {
             e.preventDefault();
             handleSaveShop();
           }}>
-            <Input 
-              placeholder="Shop Name" 
-              value={newShopName} 
-              onChange={(e) => setNewShopName(e.target.value)} 
-              className="mb-2" 
-              required
-            />
-            <Input 
-              placeholder="Description" 
-              value={newShopAddress} 
-              onChange={(e) => setNewShopAddress(e.target.value)} 
-              className="mb-2" 
-            />
-            <DialogFooter>
+            <div className="space-y-3">
+              <Input 
+                placeholder="Shop Name" 
+                value={newShopName} 
+                onChange={(e) => setNewShopName(e.target.value)} 
+                className="text-xs xs:text-sm sm:text-base h-10"
+                required
+              />
+              <Input 
+                placeholder="Description" 
+                value={newShopAddress} 
+                onChange={(e) => setNewShopAddress(e.target.value)} 
+                className="text-xs xs:text-sm sm:text-base h-10"
+              />
+            </div>
+            <DialogFooter className="mt-4 flex flex-col xs:flex-row gap-2">
               <Button 
                 type="submit"
                 disabled={isSubmittingShop}
+                className="w-full xs:w-auto text-xs xs:text-sm h-10 min-h-10"
               >
                 {isSubmittingShop ? "Saving..." : (editingShop ? "Update Shop" : "Add Shop")}
               </Button>
@@ -725,33 +802,40 @@ export default function ManageShops() {
         if (!open) resetBranchForm();
         else setOpenAddBranch({ ...openAddBranch, open });
       }}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="max-w-[95vw] sm:max-w-3xl w-full h-[90vh] sm:h-[80vh] rounded-lg mx-2">
           <DialogHeader>
-            <DialogTitle>{editingBranch ? "Edit Branch" : "Add Branch"}</DialogTitle>
+            <DialogTitle className="text-base xs:text-lg sm:text-xl text-center sm:text-left">
+              {editingBranch ? "Edit Branch" : "Add Branch"}
+            </DialogTitle>
           </DialogHeader>
           <form onSubmit={(e) => {
             e.preventDefault();
             handleSaveBranch();
-          }}>
-            <Input 
-              placeholder="Branch Name" 
-              value={branchName} 
-              onChange={(e) => setBranchName(e.target.value)} 
-              className="mb-2" 
-              required
-            />
-            <Input 
-              placeholder="Address" 
-              value={branchAddress} 
-              onChange={(e) => setBranchAddress(e.target.value)} 
-              className="mb-2" 
-              required
-            />
-            <BranchMap location={branchLocation} setLocation={setBranchLocation} />
-            <DialogFooter>
+          }} className="h-full flex flex-col">
+            <div className="space-y-3 flex-1 overflow-y-auto">
+              <Input 
+                placeholder="Branch Name" 
+                value={branchName} 
+                onChange={(e) => setBranchName(e.target.value)} 
+                className="text-xs xs:text-sm sm:text-base h-10"
+                required
+              />
+              <Input 
+                placeholder="Address" 
+                value={branchAddress} 
+                onChange={(e) => setBranchAddress(e.target.value)} 
+                className="text-xs xs:text-sm sm:text-base h-10"
+                required
+              />
+              <div className="h-48 xs:h-56 sm:h-64 w-full border rounded-md overflow-hidden">
+                <BranchMap location={branchLocation} setLocation={setBranchLocation} />
+              </div>
+            </div>
+            <DialogFooter className="mt-4 flex flex-col xs:flex-row gap-2">
               <Button 
                 type="submit"
                 disabled={isSubmittingBranch}
+                className="w-full xs:w-auto text-xs xs:text-sm h-10 min-h-10"
               >
                 {isSubmittingBranch ? "Saving..." : (editingBranch ? "Update Branch" : "Add Branch")}
               </Button>
@@ -765,56 +849,61 @@ export default function ManageShops() {
         if (!open) resetOwnerForm();
         setOpenAddOwner(open);
       }}>
-        <DialogContent>
+        <DialogContent className="max-w-[95vw] sm:max-w-md rounded-lg mx-2">
           <DialogHeader>
-            <DialogTitle>{editingOwner ? "Edit Owner" : "Add Owner"}</DialogTitle>
+            <DialogTitle className="text-base xs:text-lg sm:text-xl text-center sm:text-left">
+              {editingOwner ? "Edit Owner" : "Add Owner"}
+            </DialogTitle>
           </DialogHeader>
           <form onSubmit={(e) => {
             e.preventDefault();
             handleSaveOwner();
           }}>
-            <Input 
-              placeholder="Full Name" 
-              value={newOwnerName} 
-              onChange={(e) => setNewOwnerName(e.target.value)} 
-              className="mb-2" 
-              required
-            />
-            <Input 
-              placeholder="Email" 
-              type="email"
-              value={newOwnerEmail} 
-              onChange={(e) => setNewOwnerEmail(e.target.value)} 
-              className="mb-2" 
-              required
-            />
-            {/* Only show password field when adding new owner */}
-            {!editingOwner && (
+            <div className="space-y-3">
               <Input 
-                placeholder="Password" 
-                type="password" 
-                value={newOwnerPassword} 
-                onChange={(e) => setNewOwnerPassword(e.target.value)} 
-                className="mb-2" 
+                placeholder="Full Name" 
+                value={newOwnerName} 
+                onChange={(e) => setNewOwnerName(e.target.value)} 
+                className="text-xs xs:text-sm sm:text-base h-10"
                 required
               />
-            )}
-            <Select onValueChange={setNewOwnerShop} value={newOwnerShop} required>
-              <SelectTrigger className="w-full mb-2">
-                <SelectValue placeholder="Select Shop" />
-              </SelectTrigger>
-              <SelectContent>
-                {shops.map((s) => (
-                  <SelectItem key={s.id} value={s.id}>
-                    {s.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <DialogFooter>
+              <Input 
+                placeholder="Email" 
+                type="email"
+                value={newOwnerEmail} 
+                onChange={(e) => setNewOwnerEmail(e.target.value)} 
+                className="text-xs xs:text-sm sm:text-base h-10"
+                required
+              />
+              {/* Only show password field when adding new owner */}
+              {!editingOwner && (
+                <Input 
+                  placeholder="Password" 
+                  type="password" 
+                  value={newOwnerPassword} 
+                  onChange={(e) => setNewOwnerPassword(e.target.value)} 
+                  className="text-xs xs:text-sm sm:text-base h-10"
+                  required
+                />
+              )}
+              <Select onValueChange={setNewOwnerShop} value={newOwnerShop} required>
+                <SelectTrigger className="w-full text-xs xs:text-sm sm:text-base h-10">
+                  <SelectValue placeholder="Select Shop" />
+                </SelectTrigger>
+                <SelectContent>
+                  {shops.map((s) => (
+                    <SelectItem key={s.id} value={s.id} className="text-xs xs:text-sm sm:text-base">
+                      {s.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <DialogFooter className="mt-4 flex flex-col xs:flex-row gap-2">
               <Button 
                 type="submit"
                 disabled={isSubmittingOwner}
+                className="w-full xs:w-auto text-xs xs:text-sm h-10 min-h-10"
               >
                 {isSubmittingOwner ? "Saving..." : (editingOwner ? "Update Owner" : "Add Owner")}
               </Button>
