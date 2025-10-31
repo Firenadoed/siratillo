@@ -34,8 +34,6 @@ export default function RootLayout({
         <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
         <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
         
-        {/* Optional: Web App Manifest for PWA */}
-        <link rel="manifest" href="/site.webmanifest" />
         
         {/* Optional: Microsoft Tiles */}
         <meta name="msapplication-TileColor" content="#7c3aed" />

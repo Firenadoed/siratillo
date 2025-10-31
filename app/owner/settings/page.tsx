@@ -8,8 +8,25 @@ import { Button } from "@/lib/ui/button"
 import { Input } from "@/lib/ui/input"
 import { Switch } from "@/lib/ui/switch"
 import { Toaster, toast } from "sonner"
-import { useBranch } from "@/lib/branchcontext"
-import { Building, Clock, Phone, Image as ImageIcon, Save, MapPin } from "lucide-react"
+import { useBranch, type Branch } from "@/lib/branchcontext" // Import Branch type from context
+import { Building, Clock, Phone, Image as ImageIcon, Save, MapPin, Plus, Loader2, Edit, Power, Trash2 } from "lucide-react"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/lib/ui/dialog"
+import { Label } from "@/lib/ui/label"
+import { Textarea } from "@/lib/ui/textarea"
+import { MapContainer, TileLayer, Marker, useMapEvents } from "react-leaflet"
+import "leaflet/dist/leaflet.css"
+import L from "leaflet"
+
+// Fix for default markers in Leaflet with Next.js
+delete (L.Icon.Default.prototype as any)._getIconUrl
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+})
+
+// Default center coordinates (Philippines)
+const DEFAULT_CENTER: [number, number] = [12.8797, 121.7740]
 
 interface Shop {
   id: string
@@ -44,15 +61,53 @@ const DAYS = [
   { id: 6, name: "Saturday" }
 ]
 
+// Location Marker Component for Map
+function LocationMarker({ 
+  onLocationSelect 
+}: { 
+  onLocationSelect: (lat: number, lng: number, address: string) => void 
+}) {
+  const [position, setPosition] = useState<[number, number] | null>(null)
+
+  useMapEvents({
+    click(e) {
+      const { lat, lng } = e.latlng
+      setPosition([lat, lng])
+      const address = `Lat: ${lat.toFixed(6)}, Lng: ${lng.toFixed(6)}`
+      onLocationSelect(lat, lng, address)
+    },
+  })
+
+  return position === null ? null : <Marker position={position} />
+}
+
 // Create a separate component that uses the hook
 function SettingsContent() {
-  const { selectedBranch, branchChangeTrigger } = useBranch()
+  const { selectedBranch, branchChangeTrigger, allBranches, updateBranch, deleteBranch, refreshBranches } = useBranch()
   const [shop, setShop] = useState<Shop | null>(null)
   const [contacts, setContacts] = useState<Contact[]>([])
   const [operatingHours, setOperatingHours] = useState<OperatingHours[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [currentBranchName, setCurrentBranchName] = useState<string>('')
+
+  // Branch Creation States
+  const [isCreateBranchOpen, setIsCreateBranchOpen] = useState(false)
+  const [creatingBranch, setCreatingBranch] = useState(false)
+  
+  // Branch Edit/Delete States
+  const [editingBranch, setEditingBranch] = useState<Branch | null>(null)
+  const [isEditBranchOpen, setIsEditBranchOpen] = useState(false)
+  const [deletingBranch, setDeletingBranch] = useState<string | null>(null)
+  const [togglingBranch, setTogglingBranch] = useState<string | null>(null)
+
+  const [newBranchData, setNewBranchData] = useState({
+    name: '',
+    address: '',
+    latitude: '',
+    longitude: '',
+    locationAddress: ''
+  })
 
   // Form states
   const [shopData, setShopData] = useState({
@@ -92,7 +147,31 @@ function SettingsContent() {
           description: shop?.description || ""
         })
         setContactsData(contacts || [])
-        setHoursData(operatingHours || [])
+        
+        // Initialize hours data with all 7 days, filling in missing days
+        const initializeHoursData = (existingHours: OperatingHours[]) => {
+          const defaultHours = DAYS.map(day => {
+            const existing = existingHours.find(h => h.day_of_week === day.id)
+            if (existing) {
+              return {
+                ...existing,
+                open_time: existing.open_time || '09:00',
+                close_time: existing.close_time || '17:00'
+              }
+            }
+            // Create default entry for missing days
+            return {
+              id: `temp-${day.id}`,
+              day_of_week: day.id,
+              open_time: '09:00',
+              close_time: '17:00',
+              is_closed: false
+            }
+          })
+          return defaultHours
+        }
+
+        setHoursData(initializeHoursData(operatingHours || []))
 
         console.log("✅ Settings data loaded")
       } catch (error: any) {
@@ -196,6 +275,7 @@ function SettingsContent() {
       }
 
       // Update operating hours
+      console.log("📅 Saving operating hours:", hoursData)
       const hoursResponse = await fetch('/api/owner/settings/hours', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -251,11 +331,165 @@ function SettingsContent() {
     ))
   }
 
-  // Update operating hours
+  // Update operating hours - FIXED VERSION
   const updateHours = (dayOfWeek: number, field: string, value: any) => {
-    setHoursData(prev => prev.map(hour => 
-      hour.day_of_week === dayOfWeek ? { ...hour, [field]: value } : hour
-    ))
+    setHoursData(prev => {
+      const updated = prev.map(hour => {
+        if (hour.day_of_week === dayOfWeek) {
+          // Special handling for is_closed toggle
+          if (field === 'is_closed') {
+            return {
+              ...hour,
+              is_closed: value,
+              // Set default times when opening
+              open_time: value === false && !hour.open_time ? '09:00' : hour.open_time,
+              close_time: value === false && !hour.close_time ? '17:00' : hour.close_time
+            }
+          }
+          return { ...hour, [field]: value }
+        }
+        return hour
+      })
+      
+      console.log(`Updated day ${dayOfWeek}, ${field}:`, value, updated.find(h => h.day_of_week === dayOfWeek))
+      return updated
+    })
+  }
+
+  // Handle branch creation
+  const createBranch = async () => {
+    if (!shop?.id) {
+      toast.error('No shop found')
+      return
+    }
+
+    if (!newBranchData.name || !newBranchData.address) {
+      toast.error('Branch name and address are required')
+      return
+    }
+
+    setCreatingBranch(true)
+
+    try {
+      const response = await fetch('/api/owner/branches', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newBranchData.name,
+          address: newBranchData.address,
+          latitude: newBranchData.latitude ? parseFloat(newBranchData.latitude) : null,
+          longitude: newBranchData.longitude ? parseFloat(newBranchData.longitude) : null,
+          shopId: shop.id
+        })
+      })
+
+      const result = await response.json()
+
+      if (!response.ok || result.error) {
+        throw new Error(result.error || 'Failed to create branch')
+      }
+
+      toast.success('Branch created successfully!')
+      
+      // Refresh branches to get the complete list
+      await refreshBranches()
+      
+      setNewBranchData({ 
+        name: '', 
+        address: '', 
+        latitude: '', 
+        longitude: '',
+        locationAddress: '' 
+      })
+      setIsCreateBranchOpen(false)
+
+    } catch (error: any) {
+      console.error('Error creating branch:', error)
+      toast.error(error.message || 'Failed to create branch')
+    } finally {
+      setCreatingBranch(false)
+    }
+  }
+
+  // Handle location selection from map
+  const handleLocationSelect = (lat: number, lng: number, address: string) => {
+    setNewBranchData(prev => ({
+      ...prev,
+      latitude: lat.toString(),
+      longitude: lng.toString(),
+      locationAddress: address
+    }))
+  }
+
+  // Branch management functions
+  const handleEditBranch = (branch: Branch) => {
+    setEditingBranch(branch)
+    setNewBranchData({
+      name: branch.name,
+      address: branch.address,
+      latitude: branch.latitude?.toString() || '',
+      longitude: branch.longitude?.toString() || '',
+      locationAddress: ''
+    })
+    setIsEditBranchOpen(true)
+  }
+
+  const handleUpdateBranch = async () => {
+    if (!editingBranch) return
+
+    try {
+      await updateBranch(editingBranch.id, {
+        name: newBranchData.name,
+        address: newBranchData.address,
+        latitude: newBranchData.latitude ? parseFloat(newBranchData.latitude) : null,
+        longitude: newBranchData.longitude ? parseFloat(newBranchData.longitude) : null,
+      })
+
+      toast.success('Branch updated successfully!')
+      setIsEditBranchOpen(false)
+      setEditingBranch(null)
+      setNewBranchData({ name: '', address: '', latitude: '', longitude: '', locationAddress: '' })
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to update branch')
+    }
+  }
+
+  const handleDeleteBranch = async (branchId: string) => {
+    // Prevent deleting if it's the last branch
+    if (allBranches.length <= 1) {
+      toast.error('Cannot delete the last branch. You must have at least one branch.')
+      return
+    }
+
+    if (!window.confirm('Are you sure you want to delete this branch? This action cannot be undone.')) {
+      return
+    }
+
+    setDeletingBranch(branchId)
+    
+    try {
+      await deleteBranch(branchId)
+      toast.success('Branch deleted successfully!')
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to delete branch')
+    } finally {
+      setDeletingBranch(null)
+    }
+  }
+
+  const handleToggleBranchStatus = async (branch: Branch) => {
+    setTogglingBranch(branch.id)
+    
+    try {
+      await updateBranch(branch.id, {
+        is_active: !branch.is_active
+      })
+      toast.success(`Branch ${!branch.is_active ? 'activated' : 'deactivated'} successfully!`)
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to update branch status')
+    } finally {
+      setTogglingBranch(null)
+    }
   }
 
   if (loading) {
@@ -290,6 +524,308 @@ function SettingsContent() {
           </div>
         </div>
       </div>
+
+      {/* ===== Branch Management ===== */}
+      <section>
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-blue-100 rounded-lg">
+              <MapPin className="w-5 h-5 text-blue-600" />
+            </div>
+            <div>
+              <h2 className="text-xl md:text-2xl font-bold text-gray-900">Branch Management</h2>
+              <p className="text-sm text-gray-500 mt-1">Manage your shop branches</p>
+            </div>
+          </div>
+          
+          <Dialog open={isCreateBranchOpen} onOpenChange={setIsCreateBranchOpen}>
+            <DialogTrigger asChild>
+              <Button className="bg-gradient-to-r from-blue-500 to-cyan-600 hover:from-blue-600 hover:to-cyan-700 text-white border-0 shadow-lg">
+                <Plus className="w-4 h-4 mr-2" />
+                Add New Branch
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>Create New Branch</DialogTitle>
+              </DialogHeader>
+              
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <Label htmlFor="branch-name">Branch Name *</Label>
+                  <Input
+                    id="branch-name"
+                    value={newBranchData.name}
+                    onChange={(e) => setNewBranchData(prev => ({ ...prev, name: e.target.value }))}
+                    placeholder="e.g., Main Branch, Downtown Location"
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="branch-address">Address *</Label>
+                  <Textarea
+                    id="branch-address"
+                    value={newBranchData.address}
+                    onChange={(e) => setNewBranchData(prev => ({ ...prev, address: e.target.value }))}
+                    placeholder="Full street address including city and postal code"
+                    rows={3}
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <Label className="block mb-2 font-medium text-gray-700">
+                    Branch Location on Map
+                  </Label>
+                  <p className="text-sm text-gray-500 mb-3 flex items-center gap-2">
+                    <MapPin size={16} />
+                    Click on the map to mark your branch location (optional but recommended)
+                  </p>
+                  
+                  <div className="border border-gray-300 rounded-lg overflow-hidden">
+                    <MapContainer
+                      center={DEFAULT_CENTER}
+                      zoom={13}
+                      style={{ height: '300px', width: '100%' }}
+                    >
+                      <TileLayer
+                        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                      />
+                      <LocationMarker onLocationSelect={handleLocationSelect} />
+                    </MapContainer>
+                  </div>
+
+                  {(newBranchData.latitude && newBranchData.longitude) && (
+                    <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-md">
+                      <p className="text-sm text-green-800">
+                        <strong>Selected Location:</strong><br />
+                        Latitude: {newBranchData.latitude}<br />
+                        Longitude: {newBranchData.longitude}<br />
+                        {newBranchData.locationAddress && `Address: ${newBranchData.locationAddress}`}
+                      </p>
+                    </div>
+                  )}
+                </div>
+                
+                <p className="text-sm text-gray-500">
+                  * Required fields. Coordinates are optional but recommended for delivery services.
+                </p>
+              </div>
+              
+              <div className="flex gap-3 justify-end">
+                <Button
+                  variant="outline"
+                  onClick={() => setIsCreateBranchOpen(false)}
+                  disabled={creatingBranch}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={createBranch}
+                  disabled={creatingBranch || !newBranchData.name || !newBranchData.address}
+                  className="bg-blue-600 hover:bg-blue-700 text-white"
+                >
+                  {creatingBranch ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Creating...
+                    </>
+                  ) : (
+                    'Create Branch'
+                  )}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </div>
+
+        <Card className="p-6 border-0 shadow-lg bg-white/80 backdrop-blur-sm">
+          <div className="text-center py-8">
+            <MapPin className="mx-auto h-12 w-12 text-gray-400 mb-4" />
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Manage Your Branches</h3>
+            <p className="text-gray-500 mb-6 max-w-md mx-auto">
+              Create multiple branches to expand your laundry service coverage. Each branch can have its own contact information, operating hours, and settings.
+            </p>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+              {/* Current branches */}
+              {allBranches.map((branch) => (
+                <div key={branch.id} className="border border-gray-200 rounded-xl p-4 bg-white hover:shadow-md transition-all group relative">
+                  <Building className="mx-auto h-8 w-8 text-blue-600 mb-2" />
+                  <h4 className="font-semibold text-gray-900 text-center">{branch.name}</h4>
+                  <p className="text-sm text-gray-500 mt-1 text-center line-clamp-2">{branch.address}</p>
+                  
+                  <div className="flex items-center justify-center mt-3 gap-2">
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                      branch.is_active 
+                        ? 'bg-green-100 text-green-800' 
+                        : 'bg-gray-100 text-gray-800'
+                    }`}>
+                      {branch.is_active ? 'Active' : 'Inactive'}
+                    </span>
+                    
+                    {/* Action buttons */}
+                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleEditBranch(branch)}
+                        className="h-8 w-8 p-0"
+                        title="Edit branch"
+                      >
+                        <Edit className="h-3 w-3" />
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleToggleBranchStatus(branch)}
+                        disabled={togglingBranch === branch.id}
+                        className="h-8 w-8 p-0"
+                        title={branch.is_active ? 'Deactivate branch' : 'Activate branch'}
+                      >
+                        {togglingBranch === branch.id ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Power className="h-3 w-3" />
+                        )}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleDeleteBranch(branch.id)}
+                        disabled={deletingBranch === branch.id || allBranches.length <= 1}
+                        className="h-8 w-8 p-0 text-red-600 border-red-200 hover:bg-red-50"
+                        title={allBranches.length <= 1 ? 'Cannot delete the last branch' : 'Delete branch'}
+                      >
+                        {deletingBranch === branch.id ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-3 w-3" />
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                  
+                  {/* Current branch indicator */}
+                  {selectedBranch?.id === branch.id && (
+                    <div className="absolute top-2 right-2">
+                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                        Current
+                      </span>
+                    </div>
+                  )}
+                </div>
+              ))}
+              
+              {/* Empty state */}
+              {allBranches.length === 0 && (
+                <div className="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center bg-gray-50 col-span-full">
+                  <Building className="mx-auto h-12 w-12 text-gray-400 mb-2" />
+                  <p className="text-sm text-gray-500">No branches found</p>
+                </div>
+              )}
+            </div>
+            
+            <Dialog open={isCreateBranchOpen} onOpenChange={setIsCreateBranchOpen}>
+              <DialogTrigger asChild>
+                <Button className="bg-gradient-to-r from-blue-500 to-cyan-600 hover:from-blue-600 hover:to-cyan-700 text-white">
+                  <Plus className="w-4 h-4 mr-2" />
+                  Create Your First Branch
+                </Button>
+              </DialogTrigger>
+            </Dialog>
+          </div>
+        </Card>
+      </section>
+
+      {/* Edit Branch Dialog */}
+      <Dialog open={isEditBranchOpen} onOpenChange={setIsEditBranchOpen}>
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Edit Branch</DialogTitle>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-branch-name">Branch Name *</Label>
+              <Input
+                id="edit-branch-name"
+                value={newBranchData.name}
+                onChange={(e) => setNewBranchData(prev => ({ ...prev, name: e.target.value }))}
+                placeholder="e.g., Main Branch, Downtown Location"
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="edit-branch-address">Address *</Label>
+              <Textarea
+                id="edit-branch-address"
+                value={newBranchData.address}
+                onChange={(e) => setNewBranchData(prev => ({ ...prev, address: e.target.value }))}
+                placeholder="Full street address including city and postal code"
+                rows={3}
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <Label className="block mb-2 font-medium text-gray-700">
+                Branch Location on Map
+              </Label>
+              <p className="text-sm text-gray-500 mb-3 flex items-center gap-2">
+                <MapPin size={16} />
+                Click on the map to update branch location (optional)
+              </p>
+              
+              <div className="border border-gray-300 rounded-lg overflow-hidden">
+                <MapContainer
+                  center={editingBranch?.latitude && editingBranch?.longitude ? 
+                    [editingBranch.latitude, editingBranch.longitude] as [number, number] : 
+                    DEFAULT_CENTER
+                  }
+                  zoom={13}
+                  style={{ height: '300px', width: '100%' }}
+                >
+                  <TileLayer
+                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                  />
+                  <LocationMarker onLocationSelect={handleLocationSelect} />
+                </MapContainer>
+              </div>
+
+              {(newBranchData.latitude && newBranchData.longitude) && (
+                <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-md">
+                  <p className="text-sm text-green-800">
+                    <strong>Selected Location:</strong><br />
+                    Latitude: {newBranchData.latitude}<br />
+                    Longitude: {newBranchData.longitude}<br />
+                    {newBranchData.locationAddress && `Address: ${newBranchData.locationAddress}`}
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+          
+          <div className="flex gap-3 justify-end">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsEditBranchOpen(false)
+                setEditingBranch(null)
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleUpdateBranch}
+              disabled={!newBranchData.name || !newBranchData.address}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              Update Branch
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* ===== Shop Information ===== */}
       <section>
@@ -464,24 +1000,18 @@ function SettingsContent() {
         
         <Card className="p-6 border-0 shadow-lg bg-white/80 backdrop-blur-sm">
           <div className="space-y-3">
-            {DAYS.map(day => {
-              const dayHours = hoursData.find(h => h.day_of_week === day.id) || {
-                id: `temp-${day.id}`,
-                day_of_week: day.id,
-                open_time: '09:00',
-                close_time: '17:00',
-                is_closed: false
-              }
-
+            {hoursData.map(dayHours => {
+              const dayName = DAYS.find(d => d.id === dayHours.day_of_week)?.name || `Day ${dayHours.day_of_week}`
+              
               return (
-                <div key={day.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 border border-gray-200 rounded-xl bg-white hover:shadow-md transition-all gap-4">
+                <div key={dayHours.day_of_week} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 border border-gray-200 rounded-xl bg-white hover:shadow-md transition-all gap-4">
                   <div className="flex items-center gap-4 flex-1 min-w-0">
-                    <span className="font-semibold text-gray-900 min-w-20 sm:min-w-24">{day.name}</span>
+                    <span className="font-semibold text-gray-900 min-w-20 sm:min-w-24">{dayName}</span>
                     
                     <div className="flex items-center gap-3">
                       <Switch
                         checked={!dayHours.is_closed}
-                        onCheckedChange={(checked) => updateHours(day.id, 'is_closed', !checked)}
+                        onCheckedChange={(checked) => updateHours(dayHours.day_of_week, 'is_closed', !checked)}
                       />
                       <span className={`text-sm font-medium ${dayHours.is_closed ? 'text-red-600' : 'text-green-600'}`}>
                         {dayHours.is_closed ? 'Closed' : 'Open'}
@@ -494,14 +1024,14 @@ function SettingsContent() {
                       <Input
                         type="time"
                         value={dayHours.open_time}
-                        onChange={(e) => updateHours(day.id, 'open_time', e.target.value)}
+                        onChange={(e) => updateHours(dayHours.day_of_week, 'open_time', e.target.value)}
                         className="w-28 sm:w-32"
                       />
                       <span className="text-gray-500 text-sm">to</span>
                       <Input
                         type="time"
                         value={dayHours.close_time}
-                        onChange={(e) => updateHours(day.id, 'close_time', e.target.value)}
+                        onChange={(e) => updateHours(dayHours.day_of_week, 'close_time', e.target.value)}
                         className="w-28 sm:w-32"
                       />
                     </div>
@@ -566,7 +1096,6 @@ export default function SettingsPage() {
   if (authLoading || !isAuthorized) {
     return (
       <DashboardLayout>
-        <Toaster position="top-right" richColors />
         <div className="flex items-center justify-center min-h-screen">
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto"></div>

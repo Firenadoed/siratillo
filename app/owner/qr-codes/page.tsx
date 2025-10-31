@@ -301,7 +301,6 @@ function QRCodesContent() {
   if (!isAuthorized) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <Toaster position="top-right" richColors />
         <div className="text-center">
           <p className="text-gray-600">Redirecting to login...</p>
         </div>
@@ -312,7 +311,6 @@ function QRCodesContent() {
   if (loading && qrCodes.length === 0) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
-        <Toaster position="top-right" richColors />
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
           <p className="mt-4 text-gray-600">Loading QR codes...</p>
@@ -323,7 +321,6 @@ function QRCodesContent() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
-      <Toaster position="top-right" richColors />
       
       <div className="p-6 lg:p-8">
         <div className="max-w-7xl mx-auto">

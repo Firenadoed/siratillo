@@ -3,21 +3,23 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { supabaseServer } from '@/lib/supabaseServer'
 
-// 🔔 Notification Helper Function
+// 🔔 ENHANCED Notification Helper Function with Push Notifications
 async function createOrderNotification(notificationData: {
-  userId: string | null; // Allow null for guests
+  userId: string | null;
   title: string;
   body: string;
   payload: any;
 }) {
-  try {
-    // If it's a guest order (customer_id is null), don't create notification
+  try { 
     if (!notificationData.userId) {
       console.log('👤 Guest order - skipping notification');
       return;
     }
 
-    const { error } = await supabaseAdmin
+    console.log('📢 Creating notification for user:', notificationData.userId);
+
+    // 1. Save to database
+    const { data: notification, error } = await supabaseAdmin
       .from('notifications')
       .insert({
         user_id: notificationData.userId,
@@ -25,15 +27,105 @@ async function createOrderNotification(notificationData: {
         body: notificationData.body,
         payload: notificationData.payload,
         sent_at: new Date().toISOString()
-      });
+      })
+      .select()
+      .single();
 
     if (error) {
       console.error('❌ Error creating notification:', error);
-    } else {
-      console.log('✅ Notification created for user:', notificationData.userId);
+      return;
     }
+
+    console.log('✅ Notification created in database:', notification.id);
+
+    // 2. Send push notification to user's devices
+    await sendPushNotificationToUser(notificationData.userId, {
+      title: notificationData.title,
+      body: notificationData.body,
+      data: notificationData.payload
+    });
+
   } catch (error) {
     console.error('💥 Error in createOrderNotification:', error);
+  }
+}
+
+// ✅ NEW: Function to send push notifications via Expo
+async function sendPushNotificationToUser(userId: string, notification: {
+  title: string;
+  body: string;
+  data: any;
+}) {
+  try {
+    console.log('📱 Getting push tokens for user:', userId);
+    
+    // 1. Get user's push tokens from database
+    const { data: pushTokens, error } = await supabaseAdmin
+      .from('user_push_tokens')
+      .select('expo_push_token')
+      .eq('user_id', userId)
+      .not('expo_push_token', 'is', null);
+
+    if (error) {
+      console.error('❌ Error fetching push tokens:', error);
+      return;
+    }
+
+    if (!pushTokens || pushTokens.length === 0) {
+      console.log('📭 No push tokens found for user:', userId);
+      return;
+    }
+
+    console.log(`📲 Sending push to ${pushTokens.length} device(s) for user:`, userId);
+
+    // 2. Send to each device
+    const sendPromises = pushTokens.map(async (tokenData) => {
+      const message = {
+        to: tokenData.expo_push_token,
+        sound: 'default',
+        title: notification.title,
+        body: notification.body,
+        data: notification.data
+      };
+
+      console.log('📤 Sending push notification:', {
+        to: tokenData.expo_push_token?.substring(0, 20) + '...',
+        title: notification.title
+      });
+
+      try {
+        const response = await fetch('https://exp.host/--/api/v2/push/send', {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/json',
+            'Accept-encoding': 'gzip, deflate',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(message),
+        });
+
+        const result = await response.json();
+        
+        if (result.data?.status === 'ok') {
+          console.log('✅ Push notification sent successfully');
+          return { success: true, result };
+        } else {
+          console.error('❌ Push notification failed:', result);
+          return { success: false, result };
+        }
+      } catch (fetchError) {
+        console.error('💥 Fetch error sending push notification:', fetchError);
+        return { success: false, error: fetchError };
+      }
+    });
+
+    const results = await Promise.all(sendPromises);
+    const successfulSends = results.filter(r => r.success).length;
+    
+    console.log(`🎯 Push notification summary: ${successfulSends}/${results.length} successful`);
+
+  } catch (error) {
+    console.error('💥 Error in sendPushNotificationToUser:', error);
   }
 }
 
@@ -71,11 +163,6 @@ export async function GET(request: NextRequest) {
       .eq('is_active', true)
       .single();
 
-    console.log('📋 Assignment check result:', { 
-      assignment, 
-      assignmentError: assignmentError?.message 
-    });
-
     if (assignmentError || !assignment) {
       return NextResponse.json({ 
         error: 'Not assigned to this branch'
@@ -84,12 +171,20 @@ export async function GET(request: NextRequest) {
 
     console.log('✅ Employee assignment verified');
 
-    // 1. INBOX: Get orders that don't have order_items
+    // 🔄 UPDATED: Get ALL orders with their order_items for proper pickup handling
     console.log('📥 Fetching orders for branch:', branchId);
     const { data: allOrders, error: ordersError } = await supabaseAdmin
       .from('orders')
       .select(`
         *,
+        order_items(
+          id,
+          status,
+          quantity,
+          subtotal,
+          started_at,
+          completed_at
+        ),
         customer:users(full_name, phone),
         branch:shop_branches(name, address, shop_id),
         method:shop_methods(code, label),
@@ -100,20 +195,28 @@ export async function GET(request: NextRequest) {
       .eq('branch_id', branchId)
       .order('created_at', { ascending: true });
 
-    console.log('📦 Orders query result:', { 
-      ordersCount: allOrders?.length, 
-      ordersError: ordersError?.message 
-    });
+    if (ordersError) {
+      console.error('❌ Orders query error:', ordersError);
+      return NextResponse.json({ error: 'Failed to fetch orders' }, { status: 500 });
+    }
 
-    // Get order_ids that already have order_items
-    console.log('🔄 Fetching processed order IDs');
-    const { data: processedOrderIds, error: processedError } = await supabaseAdmin
-      .from('order_items')
-      .select('order_id')
-      .not('order_id', 'is', null);
-
-    const processedIds = processedOrderIds?.map(item => item.order_id) || [];
-    const pendingOrders = allOrders?.filter(order => !processedIds.includes(order.id)) || [];
+    // 🔄 UPDATED: Filter pending orders - includes pickup orders waiting for driver
+    const pendingOrders = allOrders?.filter(order => {
+      const orderItem = order.order_items?.[0];
+      const orderMethod = order.method?.code;
+      
+      // No order_items = pending (delivery/dropoff)
+      if (!orderItem) return true;
+      
+      // Pickup orders: show in inbox until weighed (waiting_for_pickup or collected)
+      if (orderMethod === 'pickup') {
+        return orderItem.status === 'waiting_for_pickup' || 
+               orderItem.status === 'collected';
+      }
+      
+      // Delivery/Dropoff: show in inbox if no weight set yet
+      return !orderItem.quantity;
+    }) || [];
 
     // 2. WORK QUEUE: Get active order_items with order data
     console.log('🛒 Fetching all active order_items');
@@ -131,7 +234,7 @@ export async function GET(request: NextRequest) {
         ),
         service:shop_services(id, name, price_per_kg)
       `)
-      .in('status', ['in_progress', 'ready', 'delivering'])
+      .in('status', ['in_progress', 'ready_for_delivery', 'out_for_delivery'])
       .order('started_at', { ascending: true });
 
     // Filter by branch_id manually
@@ -154,22 +257,33 @@ export async function GET(request: NextRequest) {
       completed: completedOrders?.length || 0
     });
 
-    // Transform data with CORRECT status mapping
+    // 🔄 UPDATED: Transform data with NEW status mapping
     const transformOrderItem = (orderItem: any) => {
       const order = orderItem.order;
+      const orderMethod = order.method?.code;
       
-      // CORRECT STATUS MAPPING - FIXED
-      let frontendStatus: 'in_shop' | 'delivering' | 'done';
+      // 🔥 FIXED: Different status mapping based on order method
+      let frontendStatus: 'pending' | 'in_shop' | 'delivering' | 'done';
+      
       switch (orderItem.status) {
-        case 'in_progress':
-        case 'ready':
-          frontendStatus = 'in_shop';
+        case 'waiting_for_pickup':
+        case 'collected':
+          frontendStatus = 'pending'; // Show in INBOX until weighed
           break;
-        case 'delivering':
-          frontendStatus = 'delivering';
+        case 'in_progress':
+          frontendStatus = 'in_shop'; // Show in WORK QUEUE
+          break;
+        case 'ready_for_delivery':
+          // For dropoff: "ready_for_delivery" means ready for customer pickup
+          // For delivery: "ready_for_delivery" means ready for driver to deliver
+          frontendStatus = orderMethod === 'delivery' ? 'in_shop' : 'in_shop';
+          break;
+        case 'out_for_delivery':
+          // ONLY delivery orders should show as "delivering"
+          frontendStatus = orderMethod === 'delivery' ? 'delivering' : 'in_shop';
           break;
         case 'completed':
-          frontendStatus = 'done';
+          frontendStatus = 'done'; // Completed
           break;
         default:
           frontendStatus = 'in_shop';
@@ -181,7 +295,7 @@ export async function GET(request: NextRequest) {
         customer_name: order.customer_name || order.customer?.full_name || 'Customer',
         detergent: order.detergent?.name || null,
         softener: order.softener?.name || null,
-        method: order.method?.code || 'dropoff',
+        method: orderMethod || 'dropoff',
         method_label: order.method?.label || 'Drop-off',
         kilo: orderItem.quantity,
         amount: orderItem.subtotal,
@@ -196,33 +310,51 @@ export async function GET(request: NextRequest) {
         } : undefined,
         customer_contact: order.customer_contact,
         delivery_location: order.delivery_location,
-        shop_id: branchId
+        shop_id: branchId,
+        db_status: orderItem.status // Keep for reference
       };
     };
 
-    const transformPendingOrder = (order: any) => ({
-      id: order.id,
-      order_item_id: null,
-      customer_name: order.customer_name || order.customer?.full_name || 'Customer',
-      detergent: order.detergent?.name || null,
-      softener: order.softener?.name || null,
-      method: order.method?.code || 'dropoff',
-      method_label: order.method?.label || 'Drop-off',
-      kilo: null,
-      amount: null,
-      status: 'pending',
-      created_at: order.created_at,
-      started_at: null,
-      completed_at: null,
-      services: order.service ? {
-        id: order.service.id,
-        name: order.service.name,
-        price: order.service.price_per_kg
-      } : undefined,
-      customer_contact: order.customer_contact,
-      delivery_location: order.delivery_location,
-      shop_id: branchId
-    });
+    const transformPendingOrder = (order: any) => {
+      const orderItem = order.order_items?.[0];
+      const orderMethod = order.method?.code;
+      
+      let db_status = null;
+      let status: 'pending' = 'pending';
+      
+      if (orderItem) {
+        db_status = orderItem.status;
+        // For pickup orders with order_items, still show as pending until weighed
+        if (orderMethod === 'pickup') {
+          status = 'pending';
+        }
+      }
+
+      return {
+        id: order.id,
+        order_item_id: orderItem?.id || null,
+        customer_name: order.customer_name || order.customer?.full_name || 'Customer',
+        detergent: order.detergent?.name || null,
+        softener: order.softener?.name || null,
+        method: orderMethod || 'dropoff',
+        method_label: order.method?.label || 'Drop-off',
+        kilo: orderItem?.quantity || null,
+        amount: orderItem?.subtotal || null,
+        status: status,
+        created_at: order.created_at,
+        started_at: orderItem?.started_at || null,
+        completed_at: orderItem?.completed_at || null,
+        services: order.service ? {
+          id: order.service.id,
+          name: order.service.name,
+          price: order.service.price_per_kg
+        } : undefined,
+        customer_contact: order.customer_contact,
+        delivery_location: order.delivery_location,
+        shop_id: branchId,
+        db_status: db_status
+      };
+    };
 
     const transformHistoryOrder = (history: any) => ({
       id: history.id,
@@ -245,7 +377,8 @@ export async function GET(request: NextRequest) {
       },
       customer_contact: history.customer_contact,
       delivery_location: history.delivery_location,
-      shop_id: branchId
+      shop_id: branchId,
+      db_status: 'completed'
     });
 
     const result = {
@@ -286,65 +419,161 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    const kilo = parseFloat(weight);
-    const subtotal = kilo * pricePerKg;
-
-    // TWO-BUCKET SYSTEM: Move from ORDERS to ORDER_ITEMS
-    const { data: orderItem, error: insertError } = await supabaseAdmin
-      .from('order_items')
-      .insert({
-        order_id: orderId,
-        service_id: serviceId,
-        quantity: kilo,
-        price_per_unit: pricePerKg,
-        subtotal: subtotal,
-        status: 'in_progress',
-        started_at: new Date().toISOString()
-      })
+    // Get order method and check if pickup order already has order_items
+    const { data: order, error: orderError } = await supabaseAdmin
+      .from('orders')
       .select(`
         *,
-        order:orders(
-          *,
-          branch:shop_branches(shop_id),
-          method:shop_methods(code, label),
-          service:shop_services(name),
-          detergent:detergent_types(name),
-          softener:softener_types(name)
-        )
+        order_items(id, status),
+        method:shop_methods(code)
       `)
+      .eq('id', orderId)
       .single();
 
-    if (insertError) {
-      console.error('❌ [POST] Error creating order item:', insertError);
+    if (orderError) {
+      console.error('❌ [POST] Error fetching order:', orderError);
       return NextResponse.json({ 
-        error: 'Failed to process order: ' + insertError.message 
+        error: 'Failed to fetch order details: ' + orderError.message 
       }, { status: 500 });
     }
 
-    console.log('✅ [POST] Order successfully moved to work queue:', orderItem.id);
+    // Handle array response for method
+    const orderMethod = Array.isArray(order.method) 
+      ? order.method[0]?.code 
+      : order.method?.code;
 
-    // 🔔 CREATE NOTIFICATION FOR ORDER CONFIRMATION
-    await createOrderNotification({
-      userId: orderItem.order.customer_id,
-      title: 'Order Confirmed! ✅',
-      body: `Your laundry order has been confirmed. Weight: ${kilo}kg. Total: ₱${subtotal.toFixed(2)}`,
-      payload: {
-        order_id: orderItem.order.id,
-        order_status: 'confirmed',
-        shop_name: orderItem.order.branch?.name,
-        branch_name: orderItem.order.branch?.address,
-        total_amount: subtotal,
-        weight: kilo,
-        price_per_kg: pricePerKg,
-        service_name: orderItem.order.service?.name
+    const existingOrderItem = order.order_items?.[0];
+    const kilo = parseFloat(weight);
+    const subtotal = kilo * pricePerKg;
+
+    console.log('🎯 Order details:', { 
+      orderMethod, 
+      existingOrderItem: existingOrderItem?.status,
+      weight: kilo 
+    });
+
+    // 🔄 UPDATED: Handle pickup orders differently
+    if (orderMethod === 'pickup') {
+      // For pickup: must be collected before weighing
+      if (!existingOrderItem || existingOrderItem.status !== 'collected') {
+        return NextResponse.json({ 
+          error: 'Pickup order not collected yet. Wait for delivery driver.' 
+        }, { status: 400 });
       }
-    });
 
-    return NextResponse.json({ 
-      success: true,
-      message: 'Order moved to work queue successfully',
-      orderItem 
-    });
+      // Update existing order_item with weight and move to in_progress
+      const { data: orderItem, error: updateError } = await supabaseAdmin
+        .from('order_items')
+        .update({
+          quantity: kilo,
+          price_per_unit: pricePerKg,
+          subtotal: subtotal,
+          status: 'in_progress' // Move to washing stage
+        })
+        .eq('id', existingOrderItem.id)
+        .select(`
+          *,
+          order:orders(
+            *,
+            branch:shop_branches(shop_id),
+            method:shop_methods(code, label),
+            service:shop_services(name),
+            detergent:detergent_types(name),
+            softener:softener_types(name)
+          )
+        `)
+        .single();
+
+      if (updateError) {
+        console.error('❌ [POST] Error updating pickup order:', updateError);
+        return NextResponse.json({ 
+          error: 'Failed to process pickup order: ' + updateError.message 
+        }, { status: 500 });
+      }
+
+      console.log('✅ [POST] Pickup order weighted and moved to work queue:', orderItem.id);
+
+      // 🔔 CREATE NOTIFICATION WITH PUSH
+      await createOrderNotification({
+        userId: orderItem.order.customer_id,
+        title: 'Order Confirmed! ✅',
+        body: `Your laundry order has been confirmed. Weight: ${kilo}kg. Total: ₱${subtotal.toFixed(2)}`,
+        payload: {
+          order_id: orderItem.order.id,
+          order_status: 'confirmed',
+          shop_name: orderItem.order.branch?.name,
+          branch_name: orderItem.order.branch?.address,
+          total_amount: subtotal,
+          weight: kilo,
+          price_per_kg: pricePerKg,
+          service_name: orderItem.order.service?.name
+        }
+      });
+
+      return NextResponse.json({ 
+        success: true,
+        message: 'Pickup order weighted and moved to work queue',
+        orderItem 
+      });
+
+    } else {
+      // For delivery/dropoff: create new order_items entry
+      const { data: orderItem, error: insertError } = await supabaseAdmin
+        .from('order_items')
+        .insert({
+          order_id: orderId,
+          service_id: serviceId,
+          quantity: kilo,
+          price_per_unit: pricePerKg,
+          subtotal: subtotal,
+          status: 'in_progress', // Start washing immediately
+          started_at: new Date().toISOString()
+        })
+        .select(`
+          *,
+          order:orders(
+            *,
+            branch:shop_branches(shop_id),
+            method:shop_methods(code, label),
+            service:shop_services(name),
+            detergent:detergent_types(name),
+            softener:softener_types(name)
+          )
+        `)
+        .single();
+
+      if (insertError) {
+        console.error('❌ [POST] Error creating order item:', insertError);
+        return NextResponse.json({ 
+          error: 'Failed to process order: ' + insertError.message 
+        }, { status: 500 });
+      }
+
+      console.log('✅ [POST] Order moved to work queue:', orderItem.id);
+
+      // 🔔 CREATE NOTIFICATION WITH PUSH
+      await createOrderNotification({
+        userId: orderItem.order.customer_id,
+        title: 'Order Confirmed! ✅',
+        body: `Your laundry order has been confirmed. Weight: ${kilo}kg. Total: ₱${subtotal.toFixed(2)}`,
+        payload: {
+          order_id: orderItem.order.id,
+          order_status: 'confirmed',
+          shop_name: orderItem.order.branch?.name,
+          branch_name: orderItem.order.branch?.address,
+          total_amount: subtotal,
+          weight: kilo,
+          price_per_kg: pricePerKg,
+          service_name: orderItem.order.service?.name
+        }
+      });
+
+      return NextResponse.json({ 
+        success: true,
+        message: 'Order moved to work queue successfully',
+        orderItem 
+      });
+    }
 
   } catch (error: any) {
     console.error('💥 [POST] Order processing error:', error);
@@ -376,7 +605,7 @@ export async function PATCH(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // Get order item details first - use .maybeSingle() to handle empty results
+    // Get order item details first
     const { data: orderItem, error: fetchError } = await supabaseAdmin
       .from('order_items')
       .select(`
@@ -391,7 +620,7 @@ export async function PATCH(request: NextRequest) {
         )
       `)
       .eq('id', orderItemId)
-      .maybeSingle(); // Use maybeSingle instead of single
+      .maybeSingle();
 
     if (fetchError) {
       console.error('❌ [PATCH] Error fetching order item:', fetchError);
@@ -400,12 +629,11 @@ export async function PATCH(request: NextRequest) {
       }, { status: 500 });
     }
 
-    // Check if order item was found
     if (!orderItem) {
-      console.log('❌ [PATCH] Order item not found, might be already completed:', orderItemId);
+      console.log('❌ [PATCH] Order item not found:', orderItemId);
       return NextResponse.json({ 
         success: false,
-        message: 'Order item not found. It may have been already completed or deleted.',
+        message: 'Order item not found',
         orderItemId: orderItemId
       });
     }
@@ -420,28 +648,48 @@ export async function PATCH(request: NextRequest) {
       customer_id: orderItem.order.customer_id
     });
 
-    // SMART STATUS TRANSITION LOGIC
+    // 🔥 FIXED: DIFFERENT STATUS PROGRESSION BASED ON ORDER METHOD
     let nextStatus: string;
-    
-    if (currentStatus === 'in_progress' || currentStatus === 'ready') {
-      if (orderMethod === 'delivery' || orderMethod === 'pickup') {
-        // For delivery/pickup: in_shop → delivering
-        nextStatus = 'delivering';
+
+    if (orderMethod === 'dropoff') {
+      // 🔄 DROPOFF WORKFLOW: in_progress → completed (NO delivery steps)
+      if (currentStatus === 'in_progress') {
+        nextStatus = 'completed'; // Skip all delivery steps
       } else {
-        // For dropoff: in_shop → completed (direct to done)
-        nextStatus = 'completed';
+        nextStatus = currentStatus; // No change for other statuses
       }
-    } else if (currentStatus === 'delivering') {
-      // delivering → completed (final step for delivery/pickup)
-      nextStatus = 'completed';
-    } else {
-      nextStatus = currentStatus; // No change
+    } 
+    else if (orderMethod === 'pickup') {
+      // 🔄 PICKUP WORKFLOW: in_progress → ready_for_delivery → completed
+      if (currentStatus === 'in_progress') {
+        nextStatus = 'ready_for_delivery'; // Ready for customer pickup
+      } else if (currentStatus === 'ready_for_delivery') {
+        nextStatus = 'completed'; // Customer picks up (no out_for_delivery)
+      } else {
+        nextStatus = currentStatus;
+      }
+    }
+    else if (orderMethod === 'delivery') {
+      // 🔄 DELIVERY WORKFLOW: in_progress → ready_for_delivery → out_for_delivery → completed
+      if (currentStatus === 'in_progress') {
+        nextStatus = 'ready_for_delivery'; // Ready for driver to deliver
+      } else if (currentStatus === 'ready_for_delivery') {
+        nextStatus = 'out_for_delivery'; // Out for delivery
+      } else if (currentStatus === 'out_for_delivery') {
+        nextStatus = 'completed'; // Delivered to customer
+      } else {
+        nextStatus = currentStatus;
+      }
+    }
+    else {
+      // Default fallback
+      nextStatus = currentStatus;
     }
 
     console.log('🔄 Status transition:', {
+      method: orderMethod,
       from: currentStatus,
-      to: nextStatus,
-      method: orderMethod
+      to: nextStatus
     });
 
     const updateData: any = {
@@ -453,7 +701,7 @@ export async function PATCH(request: NextRequest) {
       updateData.completed_at = new Date().toISOString();
     }
 
-    // Update order item status in ORDER_ITEMS table
+    // Update order item status
     const { data: updatedItem, error: updateError } = await supabaseAdmin
       .from('order_items')
       .update(updateData)
@@ -470,28 +718,58 @@ export async function PATCH(request: NextRequest) {
 
     console.log('✅ [PATCH] Order status updated successfully:', updatedItem.id);
 
-    // 🔔 CREATE NOTIFICATIONS BASED ON STATUS CHANGE
-    if (nextStatus === 'delivering') {
-      // Order is now being delivered
+    // 🔔 CREATE NOTIFICATIONS WITH PUSH BASED ON STATUS CHANGE AND ORDER METHOD
+    if (nextStatus === 'ready_for_delivery') {
+      if (orderMethod === 'pickup') {
+        // Pickup: Ready for customer pickup
+        await createOrderNotification({
+          userId: orderItem.order.customer_id,
+          title: 'Ready for Pickup! 📦',
+          body: `Your laundry is cleaned, packed, and ready for pickup at the shop.`,
+          payload: {
+            order_id: orderItem.order.id,
+            order_status: 'ready_for_pickup',
+            shop_name: orderItem.order.branch?.name,
+            branch_name: orderItem.order.branch?.address
+          }
+        });
+      } else if (orderMethod === 'delivery') {
+        // Delivery: Ready for driver to deliver
+        await createOrderNotification({
+          userId: orderItem.order.customer_id,
+          title: 'Ready for Delivery! 📦',
+          body: `Your laundry is cleaned, packed, and ready for delivery.`,
+          payload: {
+            order_id: orderItem.order.id,
+            order_status: 'ready_for_delivery',
+            shop_name: orderItem.order.branch?.name,
+            branch_name: orderItem.order.branch?.address
+          }
+        });
+      }
+    } 
+    else if (nextStatus === 'out_for_delivery' && orderMethod === 'delivery') {
+      // Only delivery orders go out for delivery
       await createOrderNotification({
         userId: orderItem.order.customer_id,
         title: 'Order is Being Delivered! 🚚',
         body: `Your laundry order is now out for delivery to ${orderItem.order.delivery_location || 'your location'}.`,
         payload: {
           order_id: orderItem.order.id,
-          order_status: 'delivering',
-          delivery_status: 'delivering',
+          order_status: 'out_for_delivery',
+          delivery_status: 'out_for_delivery',
           shop_name: orderItem.order.branch?.name,
           branch_name: orderItem.order.branch?.address,
           delivery_location: orderItem.order.delivery_location
         }
       });
-    } else if (nextStatus === 'completed') {
+    } 
+    else if (nextStatus === 'completed') {
       console.log('📚 Moving completed order to order_history');
       
       const order = orderItem.order;
       
-      // Insert into order_history - USING EXACT SCHEMA FROM YOUR DATABASE
+      // Insert into order_history
       const historyData = {
         shop_id: order.branch.shop_id,
         branch_id: order.branch_id,
@@ -512,7 +790,7 @@ export async function PATCH(request: NextRequest) {
         customer_id: order.customer_id || null
       };
 
-      console.log('📝 Inserting into order_history with exact schema match');
+      console.log('📝 Inserting into order_history');
 
       const { error: historyError } = await supabaseAdmin
         .from('order_history')
@@ -526,11 +804,20 @@ export async function PATCH(request: NextRequest) {
       } else {
         console.log('✅ [PATCH] Order saved to order_history');
         
-        // 🔔 CREATE NOTIFICATION FOR ORDER COMPLETION
+        // 🔔 CREATE NOTIFICATION FOR ORDER COMPLETION WITH PUSH
+        let completionBody = '';
+        if (orderMethod === 'dropoff') {
+          completionBody = `Your dropoff laundry order has been completed! You can pick it up at the shop.`;
+        } else if (orderMethod === 'pickup') {
+          completionBody = `Your pickup laundry order has been completed and is ready for collection!`;
+        } else if (orderMethod === 'delivery') {
+          completionBody = `Your delivery laundry order has been completed and delivered!`;
+        }
+
         await createOrderNotification({
           userId: order.customer_id,
           title: 'Order Completed! 🎉',
-          body: `Your laundry order has been completed and is ready for ${order.method?.code === 'delivery' ? 'delivery' : 'pickup'}.`,
+          body: completionBody,
           payload: {
             order_id: order.id,
             order_status: 'completed',
@@ -544,7 +831,7 @@ export async function PATCH(request: NextRequest) {
         });
       }
 
-      // Delete from order_items (work queue) - ONLY after successful history insert
+      // Delete from order_items (work queue)
       const { error: deleteError } = await supabaseAdmin
         .from('order_items')
         .delete()
@@ -552,21 +839,18 @@ export async function PATCH(request: NextRequest) {
 
       if (deleteError) {
         console.error('❌ [PATCH] Error deleting from order_items:', deleteError);
-        return NextResponse.json({ 
-          error: 'Failed to clean up order items: ' + deleteError.message 
-        }, { status: 500 });
       } else {
         console.log('✅ [PATCH] Order removed from order_items');
       }
 
-      // Delete from orders (inbox) if it exists
+      // Delete from orders (inbox)
       const { error: deleteOrderError } = await supabaseAdmin
         .from('orders')
         .delete()
         .eq('id', order.id);
 
       if (deleteOrderError) {
-        console.log('ℹ️ Order already removed from orders table or delete failed:', deleteOrderError.message);
+        console.log('ℹ️ Order already removed from orders table:', deleteOrderError.message);
       } else {
         console.log('✅ [PATCH] Order removed from orders');
       }
@@ -583,6 +867,148 @@ export async function PATCH(request: NextRequest) {
     console.error('💥 [PATCH] Order status update error:', error);
     return NextResponse.json(
       { error: 'Failed to update order status: ' + error.message },
+      { status: 500 }
+    );
+  }
+}
+
+// 🔥 FIXED: Manual Orders API Route - Only creates order, no order_item
+export async function PUT(request: NextRequest) {
+  try {
+    console.log('🔄 [MANUAL ORDER] Starting manual order creation API');
+    
+    const supabaseAuth = await supabaseServer()
+    const { data: { user }, error: userError } = await supabaseAuth.auth.getUser()
+    
+    if (userError || !user) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    }
+
+    const {
+      branchId,
+      customerName,
+      customerPhone,
+      method,
+      deliveryAddress,
+      deliveryLat,
+      deliveryLng,
+      serviceId,
+      detergentId,
+      softenerId,
+    } = await request.json();
+    
+    console.log('📦 [MANUAL ORDER] Creating order with data:', { 
+      branchId, customerName, method, serviceId,
+      deliveryLat, deliveryLng
+    });
+
+    // Validate required fields
+    if (!branchId || !customerName || !serviceId) {
+      return NextResponse.json({ 
+        error: 'Missing required fields: branchId, customerName, serviceId' 
+      }, { status: 400 });
+    }
+
+    // Verify employee assignment to this branch
+    const { data: assignment, error: assignmentError } = await supabaseAdmin
+      .from('shop_user_assignments')
+      .select('id, shop_id, user_id')
+      .eq('user_id', user.id)
+      .eq('branch_id', branchId)
+      .eq('role_in_shop', 'employee')
+      .eq('is_active', true)
+      .single();
+
+    if (assignmentError || !assignment) {
+      return NextResponse.json({ 
+        error: 'Not assigned to this branch or unauthorized' 
+      }, { status: 403 });
+    }
+
+    // Get method ID
+    const { data: methodData, error: methodError } = await supabaseAdmin
+      .from('shop_methods')
+      .select('id')
+      .eq('code', method)
+      .single();
+
+    if (methodError) {
+      console.error('❌ [MANUAL ORDER] Error fetching method:', methodError);
+      return NextResponse.json({ 
+        error: 'Invalid service method' 
+      }, { status: 400 });
+    }
+
+    // Start transaction - create order only (no order_item)
+    console.log('💾 [MANUAL ORDER] Creating order record...');
+    
+    // ✅ FIXED: Create only the order, no order_item with weight
+    const { data: order, error: orderError } = await supabaseAdmin
+      .from('orders')
+      .insert({
+        branch_id: branchId,
+        customer_name: customerName,
+        customer_contact: customerPhone || null,
+        method_id: methodData.id,
+        delivery_location: deliveryAddress || null,
+        delivery_latitude: deliveryLat || null,
+        delivery_longitude: deliveryLng || null,
+        service_id: serviceId,
+        detergent_id: detergentId || null,
+        softener_id: softenerId || null,
+        created_at: new Date().toISOString(),
+        customer_id: null // Manual orders don't have registered customers
+      })
+      .select()
+      .single();
+
+    if (orderError) {
+      console.error('❌ [MANUAL ORDER] Error creating order:', orderError);
+      return NextResponse.json({ 
+        error: 'Failed to create order: ' + orderError.message 
+      }, { status: 500 });
+    }
+
+    console.log('✅ [MANUAL ORDER] Order created:', order.id);
+
+    // Log the manual order creation
+    await supabaseAdmin
+      .from('employee_actions')
+      .insert({
+        employee_id: user.id,
+        branch_id: branchId,
+        action_type: 'manual_order_creation',
+        description: `Created manual order for ${customerName}`,
+        order_id: order.id,
+        metadata: {
+          customer_name: customerName,
+          method: method,
+          service_id: serviceId,
+          delivery_lat: deliveryLat,
+          delivery_lng: deliveryLng
+        },
+        created_at: new Date().toISOString()
+      });
+
+    console.log('🎉 [MANUAL ORDER] Manual order creation completed successfully');
+
+    return NextResponse.json({ 
+      success: true,
+      message: 'Manual order created successfully',
+      order: {
+        id: order.id,
+        customer_name: customerName,
+        method: method,
+        service_id: serviceId,
+        delivery_latitude: deliveryLat,
+        delivery_longitude: deliveryLng
+      }
+    });
+
+  } catch (error: any) {
+    console.error('💥 [MANUAL ORDER] Manual order creation error:', error);
+    return NextResponse.json(
+      { error: 'Failed to create manual order: ' + error.message },
       { status: 500 }
     );
   }

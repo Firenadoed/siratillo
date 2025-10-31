@@ -16,10 +16,6 @@ import { useBranch } from "@/lib/branchcontext";
 
 const COLORS = ["#0088FE", "#00C49F", "#FFBB28"];
 
-const toDayKey = (d: Date): string =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-const weekdayShort = (d: Date): string => d.toLocaleDateString("en-US", { weekday: "short" });
-
 interface Order {
   id: string;
   customer_name: string;
@@ -27,6 +23,7 @@ interface Order {
   amount: number;
   created_at: string;
   status: string | null;
+  items: any[];
 }
 
 interface Shop {
@@ -34,14 +31,26 @@ interface Shop {
   name: string;
 }
 
-function DashboardContent() { // 👈 RENAME this component
+interface Analytics {
+  totalSales: number;
+  totalOrders: number;
+  uniqueCustomers: number;
+  chartData: { name: string; sales: number }[];
+  methodDistribution: { name: string; value: number }[];
+  customerGrowthData: { name: string; new: number; returning: number }[];
+  period: string;
+}
+
+function DashboardContent() {
   const router = useRouter();
   const { selectedBranch, branchChangeTrigger } = useBranch();
 
   const [orders, setOrders] = useState<Order[]>([]);
+  const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [loading, setLoading] = useState(true);
   const [shopName, setShopName] = useState<string | null>(null);
   const [isAuthorized, setIsAuthorized] = useState(false);
+  const [timePeriod, setTimePeriod] = useState<'daily' | 'weekly' | 'monthly' | 'yearly'>('weekly');
 
   // ==============================
   // 🔐 AUTHENTICATION CHECK FIRST
@@ -84,21 +93,27 @@ function DashboardContent() { // 👈 RENAME this component
     const fetchData = async () => {
       try {
         setLoading(true);
-        console.log("📡 Fetching owner dashboard data for branch:", selectedBranch.id)
+        console.log("📡 Fetching owner dashboard data for branch:", selectedBranch.id, "period:", timePeriod);
 
-        const response = await fetch(`/api/owner/dashboard-data?branch_id=${selectedBranch.id}`);
-        const { shop, orders, error } = await response.json();
+        const response = await fetch(
+          `/api/owner/dashboard-data?branch_id=${selectedBranch.id}&period=${timePeriod}`
+        );
+        const data = await response.json();
         
-        if (error) throw new Error(error);
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to fetch data");
+        }
         
-        if (shop) {
-          setShopName(shop.name);
-          console.log("🏪 Shop found:", shop.name)
+        console.log("📊 API Response:", data);
+        
+        if (data.shop) {
+          setShopName(data.shop.name);
+          console.log("🏪 Shop found:", data.shop.name)
         } else {
           console.log("❌ No shop found for this owner")
         }
         
-        const parsedOrders = (orders || []).map((o: any) => ({
+        const parsedOrders = (data.orders || []).map((o: any) => ({
           id: o.id,
           customer_name: o.customer_name,
           method: o.method,
@@ -109,6 +124,13 @@ function DashboardContent() { // 👈 RENAME this component
         })) as Order[];
 
         setOrders(parsedOrders);
+        
+        // Set analytics data from API
+        if (data.analytics) {
+          setAnalytics(data.analytics);
+          console.log("📈 Analytics loaded:", data.analytics);
+        }
+        
         console.log("📦 Orders loaded:", parsedOrders.length)
         
       } catch (error: any) {
@@ -120,114 +142,39 @@ function DashboardContent() { // 👈 RENAME this component
     };
 
     fetchData();
-  }, [isAuthorized, selectedBranch, branchChangeTrigger]);
+  }, [isAuthorized, selectedBranch, branchChangeTrigger, timePeriod]);
 
   // ==============================
-  // 📈 ANALYTICS CALCULATIONS
+  // 📈 USE ANALYTICS FROM API INSTEAD OF CALCULATING
   // ==============================
   const {
     totalSales,
-    ordersToday,
+    totalOrders,
     uniqueCustomers,
-    weeklySales,
-    weeklyPie,
-    weeklyCustomerGrowth,
+    chartData,
+    methodDistribution,
+    customerGrowthData,
   } = useMemo(() => {
-    if (orders.length === 0) {
+    if (!analytics) {
       return {
         totalSales: 0,
-        ordersToday: 0,
+        totalOrders: 0,
         uniqueCustomers: 0,
-        weeklySales: [],
-        weeklyPie: [],
-        weeklyCustomerGrowth: [],
+        chartData: [],
+        methodDistribution: [],
+        customerGrowthData: [],
       };
     }
 
-    console.log("📊 Calculating analytics for", orders.length, "orders")
-
-    const now = new Date();
-    const todayKey = toDayKey(now);
-
-    const earliestByCustomer = new Map<string, string>();
-    for (const o of orders) {
-      const key = toDayKey(new Date(o.created_at));
-      const name = o.customer_name?.trim();
-      if (name && (!earliestByCustomer.has(name) || key < earliestByCustomer.get(name)!)) {
-        earliestByCustomer.set(name, key);
-      }
-    }
-
-    const todaysOrders = orders.filter(
-      (o) => toDayKey(new Date(o.created_at)) === todayKey
-    );
-
-    const totalSales = todaysOrders.reduce((sum, o) => sum + o.amount, 0);
-    const ordersToday = todaysOrders.length;
-    const uniqueCustomers = new Set(todaysOrders.map((o) => o.customer_name)).size;
-
-    // weekly data
-    const today = new Date();
-    const monday = new Date(today);
-    monday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
-
-    const weekDays = Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(monday);
-      d.setDate(monday.getDate() + i);
-      return { name: weekdayShort(d), key: toDayKey(d) };
-    });
-
-    const weeklySales = weekDays.map((wd) => ({
-      name: wd.name,
-      sales: orders
-        .filter((o) => toDayKey(new Date(o.created_at)) === wd.key)
-        .reduce((sum, o) => sum + o.amount, 0),
-    }));
-
-    const weeklyOrders = orders.filter((o) => {
-      const k = toDayKey(new Date(o.created_at));
-      return k >= weekDays[0].key && k <= weekDays[6].key;
-    });
-
-    const countMethods = (arr: Order[]) => {
-      const counts = { DropOff: 0, PickUp: 0, Delivery: 0 };
-      for (const o of arr) {
-        const m = (o.method || "").toLowerCase();
-        if (m.includes("drop")) counts.DropOff++;
-        else if (m.includes("pick")) counts.PickUp++;
-        else if (m.includes("del")) counts.Delivery++;
-      }
-      return [
-        { name: "Drop Off", value: counts.DropOff },
-        { name: "Pick Up", value: counts.PickUp },
-        { name: "Delivery", value: counts.Delivery },
-      ];
-    };
-
-    const weeklyPie = countMethods(weeklyOrders);
-
-    const weeklyCustomerGrowth = weekDays.map((wd) => {
-      const customers = new Set(
-        orders
-          .filter((o) => toDayKey(new Date(o.created_at)) === wd.key)
-          .map((o) => o.customer_name)
-      );
-      let newCount = 0;
-      customers.forEach((name) => {
-        if (earliestByCustomer.get(name) === wd.key) newCount++;
-      });
-      return { name: wd.name, new: newCount, returning: customers.size - newCount };
-    });
-
     return {
-      totalSales,
-      ordersToday,
-      uniqueCustomers,
-      weeklySales,
-      weeklyPie,
-      weeklyCustomerGrowth,
+      totalSales: analytics.totalSales || 0,
+      totalOrders: analytics.totalOrders || 0,
+      uniqueCustomers: analytics.uniqueCustomers || 0,
+      chartData: analytics.chartData || [],
+      methodDistribution: analytics.methodDistribution || [],
+      customerGrowthData: analytics.customerGrowthData || [],
     };
-  }, [orders]);
+  }, [analytics]);
 
   // ==============================
   // 🎯 RENDER LOGIC
@@ -284,51 +231,89 @@ function DashboardContent() { // 👈 RENAME this component
       <div className="mb-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
         <p className="text-blue-700 font-medium">
           Viewing data for: <span className="font-bold">{selectedBranch.name}</span>
+          <span className="ml-2 text-blue-600">• {timePeriod.charAt(0).toUpperCase() + timePeriod.slice(1)} View</span>
         </p>
       </div>
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6 mb-6">
         <Card className="bg-green-100">
-          <CardHeader><CardTitle>Sales Today</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle>
+              Sales {timePeriod === 'daily' ? 'Today' : `This ${timePeriod.charAt(0).toUpperCase() + timePeriod.slice(1)}`}
+            </CardTitle>
+          </CardHeader>
           <CardContent>
             <p className="text-xl sm:text-2xl font-bold">₱{totalSales.toLocaleString()}</p>
           </CardContent>
         </Card>
 
         <Card className="bg-yellow-100">
-          <CardHeader><CardTitle>Orders Today</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle>
+              Orders {timePeriod === 'daily' ? 'Today' : `This ${timePeriod.charAt(0).toUpperCase() + timePeriod.slice(1)}`}
+            </CardTitle>
+          </CardHeader>
           <CardContent>
-            <p className="text-xl sm:text-2xl font-bold">{ordersToday}</p>
+            <p className="text-xl sm:text-2xl font-bold">{totalOrders}</p>
           </CardContent>
         </Card>
 
         <Card className="bg-purple-100">
-          <CardHeader><CardTitle>Unique Customers</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle>Unique Customers</CardTitle>
+          </CardHeader>
           <CardContent>
             <p className="text-xl sm:text-2xl font-bold">{uniqueCustomers}</p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Charts */}
-      <Tabs defaultValue="weekly" className="w-full">
+      {/* Charts with Time Period Tabs */}
+      <Tabs value={timePeriod} className="w-full">
         <TabsList className="flex flex-wrap justify-center gap-2 mb-4">
-          <TabsTrigger value="weekly">Weekly</TabsTrigger>
+          <TabsTrigger 
+            value="daily"
+            onClick={() => setTimePeriod('daily')}
+            className={timePeriod === 'daily' ? 'bg-blue-500 text-black' : ''}
+          >
+            Daily
+          </TabsTrigger>
+          <TabsTrigger 
+            value="weekly"
+            onClick={() => setTimePeriod('weekly')}
+            className={timePeriod === 'weekly' ? 'bg-blue-500 text-black' : ''}
+          >
+            Weekly
+          </TabsTrigger>
+          <TabsTrigger 
+            value="monthly"
+            onClick={() => setTimePeriod('monthly')}
+            className={timePeriod === 'monthly' ? 'bg-blue-500 text-black' : ''}
+          >
+            Monthly
+          </TabsTrigger>
+          <TabsTrigger 
+            value="yearly"
+            onClick={() => setTimePeriod('yearly')}
+            className={timePeriod === 'yearly' ? 'bg-blue-500 text-black' : ''}
+          >
+            Yearly
+          </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="weekly">
+        <TabsContent value={timePeriod}>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-            <ChartCard title="Sales Overview">
-              <LineChartComp data={weeklySales} />
+            <ChartCard title={`Sales Overview - ${timePeriod.charAt(0).toUpperCase() + timePeriod.slice(1)}`}>
+              <LineChartComp data={chartData} />
             </ChartCard>
 
-            <ChartCard title="Services Distribution">
-              <PieChartComp data={weeklyPie} />
+            <ChartCard title={`Services Distribution - ${timePeriod.charAt(0).toUpperCase() + timePeriod.slice(1)}`}>
+              <PieChartComp data={methodDistribution} />
             </ChartCard>
 
-            <ChartCard title="Customer Growth Trend">
-              <BarChartComp data={weeklyCustomerGrowth} />
+            <ChartCard title={`Customer Growth - ${timePeriod.charAt(0).toUpperCase() + timePeriod.slice(1)}`}>
+              <BarChartComp data={customerGrowthData} />
             </ChartCard>
           </div>
         </TabsContent>
@@ -341,7 +326,7 @@ function DashboardContent() { // 👈 RENAME this component
 function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <Card className="shadow-sm hover:shadow-md transition">
-      <CardHeader><CardTitle>{title}</CardTitle></CardHeader>
+      <CardHeader><CardTitle className="text-sm sm:text-base">{title}</CardTitle></CardHeader>
       <CardContent className="h-64 sm:h-72 p-2 sm:p-4">{children}</CardContent>
     </Card>
   );
@@ -354,27 +339,70 @@ function LineChartComp({ data }: { data: { name: string; sales: number }[] }) {
         <CartesianGrid strokeDasharray="3 3" />
         <XAxis dataKey="name" />
         <YAxis />
-        <Tooltip />
-        <Line type="monotone" dataKey="sales" stroke="#8884d8" strokeWidth={2} />
+        <Tooltip 
+          formatter={(value) => [`₱${Number(value).toLocaleString()}`, 'Sales']}
+        />
+        <Line 
+          type="monotone" 
+          dataKey="sales" 
+          stroke="#8884d8" 
+          strokeWidth={2} 
+          dot={{ fill: '#8884d8', strokeWidth: 2, r: 4 }}
+          activeDot={{ r: 6, stroke: '#8884d8', strokeWidth: 2 }}
+        />
       </LineChart>
     </ResponsiveContainer>
   );
 }
 
 function PieChartComp({ data }: { data: { name: string; value: number }[] }) {
+  const renderCustomizedLabel = ({
+    cx,
+    cy,
+    midAngle,
+    innerRadius,
+    outerRadius,
+    percent,
+  }: any) => {
+    const RADIAN = Math.PI / 180;
+    const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
+    const x = cx + radius * Math.cos(-midAngle * RADIAN);
+    const y = cy + radius * Math.sin(-midAngle * RADIAN);
+
+    return (
+      <text
+        x={x}
+        y={y}
+        fill="white"
+        textAnchor={x > cx ? 'start' : 'end'}
+        dominantBaseline="central"
+      >
+        {`${(percent * 100).toFixed(0)}%`}
+      </text>
+    );
+  };
+
   return (
     <ResponsiveContainer width="100%" height="100%">
       <PieChart>
-        <Pie data={data} dataKey="value" outerRadius={80} label>
+        <Pie 
+          data={data} 
+          dataKey="value" 
+          nameKey="name"
+          outerRadius={80} 
+          label={renderCustomizedLabel}
+          labelLine={false}
+        >
           {data.map((entry, i) => (
             <Cell key={i} fill={COLORS[i % COLORS.length]} />
           ))}
         </Pie>
-        <Tooltip />
+        <Tooltip formatter={(value) => [value, 'Orders']} />
       </PieChart>
     </ResponsiveContainer>
   );
 }
+
 
 function BarChartComp({ data }: { data: { name: string; new: number; returning: number }[] }) {
   return (
@@ -384,8 +412,8 @@ function BarChartComp({ data }: { data: { name: string; new: number; returning: 
         <XAxis dataKey="name" />
         <YAxis />
         <Tooltip />
-        <Bar dataKey="new" stackId="a" fill="#82ca9d" />
-        <Bar dataKey="returning" stackId="a" fill="#8884d8" />
+        <Bar dataKey="new" name="New Customers" fill="#82ca9d" />
+        <Bar dataKey="returning" name="Returning Customers" fill="#8884d8" />
       </BarChart>
     </ResponsiveContainer>
   );

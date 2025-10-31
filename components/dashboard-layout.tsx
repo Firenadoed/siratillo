@@ -117,6 +117,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   
   return isOpen;
 }
+
   // ==============================
   // 🔐 AUTHENTICATION CHECK FIRST
   // ==============================
@@ -230,6 +231,100 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     return () => clearInterval(interval);
   }, [selectedBranch, operatingHours]);
 
+  // ==============================
+  // 🔄 BRANCH MANAGEMENT FUNCTIONS
+  // ==============================
+  const refreshBranches = async () => {
+    try {
+      const response = await fetch('/api/owner/branches')
+      if (response.ok) {
+        const { branches } = await response.json()
+        setBranches(branches || [])
+        
+        // If the currently selected branch still exists, keep it selected
+        if (selectedBranch) {
+          const updatedSelectedBranch = branches.find((b: Branch) => b.id === selectedBranch.id)
+          setSelectedBranch(updatedSelectedBranch || branches[0] || null)
+        } else if (branches.length > 0) {
+          setSelectedBranch(branches[0])
+        }
+        
+        setBranchChangeTrigger(prev => prev + 1)
+      }
+    } catch (error) {
+      console.error('Error refreshing branches:', error)
+    }
+  }
+
+  const addBranch = (branch: Branch) => {
+    setBranches(prev => [...prev, branch])
+    setBranchChangeTrigger(prev => prev + 1)
+  }
+
+  const updateBranches = (branchesList: Branch[]) => {
+    setBranches(branchesList)
+    setBranchChangeTrigger(prev => prev + 1)
+  }
+
+  const updateBranch = async (branchId: string, updates: Partial<Branch>) => {
+    try {
+      const response = await fetch('/api/owner/branches', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: branchId, ...updates })
+      })
+
+      if (!response.ok) {
+        const { error } = await response.json()
+        throw new Error(error || 'Failed to update branch')
+      }
+
+      const { branch: updatedBranch } = await response.json()
+      
+      // Update in local state
+      setBranches(prev => 
+        prev.map(branch => branch.id === branchId ? { ...branch, ...updatedBranch } : branch)
+      )
+      
+      // If the updated branch is currently selected, update it too
+      if (selectedBranch?.id === branchId) {
+        setSelectedBranch(prev => prev ? { ...prev, ...updatedBranch } : null)
+      }
+      
+      setBranchChangeTrigger(prev => prev + 1)
+    } catch (error) {
+      console.error('Error updating branch:', error)
+      throw error
+    }
+  }
+
+  const deleteBranch = async (branchId: string) => {
+    try {
+      const response = await fetch(`/api/owner/branches?id=${branchId}`, {
+        method: 'DELETE'
+      })
+
+      if (!response.ok) {
+        const { error } = await response.json()
+        throw new Error(error || 'Failed to delete branch')
+      }
+
+      // Remove from local state
+      setBranches(prev => prev.filter(branch => branch.id !== branchId))
+      
+      // If the deleted branch was selected, select another one
+      if (selectedBranch?.id === branchId) {
+        const remainingBranches = branches.filter(branch => branch.id !== branchId)
+        setSelectedBranch(remainingBranches[0] || null)
+      }
+      
+      setBranchChangeTrigger(prev => prev + 1)
+    } catch (error) {
+      console.error('Error deleting branch:', error)
+      throw error
+    }
+  }
+
   const handleLogout = async () => {
     try {
       const response = await fetch('/api/auth/logout', { method: 'POST' })
@@ -262,7 +357,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     <BranchContext.Provider value={{
       selectedBranch,
       branchChangeTrigger,
-      allBranches: branches
+      allBranches: branches,
+      setSelectedBranch,
+      refreshBranches,
+      addBranch,
+      updateBranches,
+      updateBranch,
+      deleteBranch
     }}>
       <div className="flex h-screen bg-gray-50">
         <Toaster position="top-right" richColors />
