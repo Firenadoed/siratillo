@@ -4,7 +4,7 @@ import { sendEmailNodemailer } from '@/lib/nodemailer'
 
 // PUT /api/admin/account-requests/[id] - Update account request status
 export async function PUT(
-  request: Request,
+  request: NextRequest, // ✅ FIXED: Changed from Request to NextRequest
   { params }: { params: { id: string } }
 ) {
   try {
@@ -93,7 +93,7 @@ async function sendApprovalEmail(email: string, name: string, password: string, 
           </div>
           
           <div style="text-align: center; margin: 30px 0;">
-            <a href="${process.env.NEXT_PUBLIC_APP_URL}/owner/login" 
+            <a href="${process.env.NEXT_PUBLIC_APP_URL}/login" 
                style="background: #7C3AED; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
               🚀 Access Your Dashboard
             </a>
@@ -336,5 +336,30 @@ async function createDefaultServices(branchId: string) {
   } catch (error) {
     console.error("Error creating default services:", error)
     // Don't throw here - services creation shouldn't block the main flow
+  }
+}
+
+// Optional: Add GET method to fetch specific account request
+export async function GET(
+  request: NextRequest, // ✅ Also use NextRequest here
+  { params }: { params: { id: string } }
+) {
+  try {
+    const requestId = params.id
+
+    const { data: accountRequest, error } = await supabaseAdmin
+      .from('account_requests')
+      .select('*')
+      .eq('id', requestId)
+      .single()
+
+    if (error || !accountRequest) {
+      return NextResponse.json({ error: "Account request not found" }, { status: 404 })
+    }
+
+    return NextResponse.json({ request: accountRequest })
+  } catch (error: any) {
+    console.error("Error fetching account request:", error)
+    return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }
