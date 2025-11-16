@@ -5,8 +5,8 @@ import { createClient } from '@supabase/supabase-js';
 
 // 🔒 Use a client with limited permissions instead of service role
 const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_ANON_KEY! // Use anonymous key instead of service role
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,      // ✅ CORRECT
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!  // ✅ CORRECT
 );
 
 export async function POST(request: NextRequest) {
