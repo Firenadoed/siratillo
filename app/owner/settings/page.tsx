@@ -8,22 +8,48 @@ import { Button } from "@/lib/ui/button"
 import { Input } from "@/lib/ui/input"
 import { Switch } from "@/lib/ui/switch"
 import { Toaster, toast } from "sonner"
-import { useBranch, type Branch } from "@/lib/branchcontext" // Import Branch type from context
+import { useBranch, type Branch } from "@/lib/branchcontext"
 import { Building, Clock, Phone, Image as ImageIcon, Save, MapPin, Plus, Loader2, Edit, Power, Trash2 } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/lib/ui/dialog"
 import { Label } from "@/lib/ui/label"
 import { Textarea } from "@/lib/ui/textarea"
-import { MapContainer, TileLayer, Marker, useMapEvents } from "react-leaflet"
-import "leaflet/dist/leaflet.css"
-import L from "leaflet"
+import dynamic from 'next/dynamic'
 
-// Fix for default markers in Leaflet with Next.js
-delete (L.Icon.Default.prototype as any)._getIconUrl
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-})
+// Dynamically import map components with no SSR
+const MapContainer = dynamic(
+  () => import('react-leaflet').then((mod) => mod.MapContainer),
+  { ssr: false }
+)
+
+const TileLayer = dynamic(
+  () => import('react-leaflet').then((mod) => mod.TileLayer),
+  { ssr: false }
+)
+
+const Marker = dynamic(
+  () => import('react-leaflet').then((mod) => mod.Marker),
+  { ssr: false }
+)
+
+// Dynamically import the useMapEvents hook
+const LocationMarker = dynamic(
+  () => Promise.resolve(({ onLocationSelect }: { onLocationSelect: (lat: number, lng: number, address: string) => void }) => {
+    const { useMapEvents } = require('react-leaflet')
+    const [position, setPosition] = useState<[number, number] | null>(null)
+
+    useMapEvents({
+      click(e: any) {
+        const { lat, lng } = e.latlng
+        setPosition([lat, lng])
+        const address = `Lat: ${lat.toFixed(6)}, Lng: ${lng.toFixed(6)}`
+        onLocationSelect(lat, lng, address)
+      },
+    })
+
+    return position === null ? null : <Marker position={position} />
+  }),
+  { ssr: false }
+)
 
 // Default center coordinates (Philippines)
 const DEFAULT_CENTER: [number, number] = [9.3100, 123.3080]
@@ -60,26 +86,6 @@ const DAYS = [
   { id: 5, name: "Friday" },
   { id: 6, name: "Saturday" }
 ]
-
-// Location Marker Component for Map
-function LocationMarker({ 
-  onLocationSelect 
-}: { 
-  onLocationSelect: (lat: number, lng: number, address: string) => void 
-}) {
-  const [position, setPosition] = useState<[number, number] | null>(null)
-
-  useMapEvents({
-    click(e) {
-      const { lat, lng } = e.latlng
-      setPosition([lat, lng])
-      const address = `Lat: ${lat.toFixed(6)}, Lng: ${lng.toFixed(6)}`
-      onLocationSelect(lat, lng, address)
-    },
-  })
-
-  return position === null ? null : <Marker position={position} />
-}
 
 // Create a separate component that uses the hook
 function SettingsContent() {
@@ -118,6 +124,19 @@ function SettingsContent() {
   const [logoPreview, setLogoPreview] = useState("")
   const [contactsData, setContactsData] = useState<Contact[]>([])
   const [hoursData, setHoursData] = useState<OperatingHours[]>([])
+
+  // Fix Leaflet icons only in browser
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const L = require('leaflet')
+      delete (L.Icon.Default.prototype as any)._getIconUrl
+      L.Icon.Default.mergeOptions({
+        iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+        iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+        shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+      })
+    }
+  }, [])
 
   // Fetch shop settings data
   useEffect(() => {
