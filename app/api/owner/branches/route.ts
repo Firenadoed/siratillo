@@ -1,28 +1,19 @@
+// app/api/owner/branches/route.ts
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
+import { requireOwner, isOwnerOfShop } from '@/lib/owner-auth'
+import { supabaseAdmin } from '@/lib/supabaseAdmin'
 
 export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url)
-    const shopId = searchParams.get('shop_id')
+    // Verify owner access and get their shop ID
+    const { userId, shopId } = await requireOwner()
 
-    // If you need to filter by shop, you can use the shopId
-    let query = supabase
+    // Fetch branches only for this owner's shop
+    const { data: branches, error } = await supabaseAdmin
       .from('shop_branches')
       .select('*')
+      .eq('shop_id', shopId)
       .order('created_at', { ascending: true })
-
-    // If shopId is provided, filter by shop
-    if (shopId) {
-      query = query.eq('shop_id', shopId)
-    }
-
-    const { data: branches, error } = await query
 
     if (error) {
       console.error('Error fetching branches:', error)
@@ -39,29 +30,32 @@ export async function GET(request: NextRequest) {
   } catch (error: any) {
     console.error('Error in branches fetch:', error)
     return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
+      { error: error.message || 'Internal server error' },
+      { status: error.status || 500 }
     )
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const { name, address, latitude, longitude, shopId } = await request.json()
+    // Verify owner access and get their shop ID
+    const { userId, shopId } = await requireOwner()
 
-    if (!name || !address || !shopId) {
+    const { name, address, latitude, longitude } = await request.json()
+
+    if (!name || !address) {
       return NextResponse.json(
-        { error: 'Name, address, and shop ID are required' },
+        { error: 'Name and address are required' },
         { status: 400 }
       )
     }
 
-    // Create the branch
-    const { data: branch, error: branchError } = await supabase
+    // Create the branch under the owner's shop
+    const { data: branch, error: branchError } = await supabaseAdmin
       .from('shop_branches')
       .insert([
         {
-          shop_id: shopId,
+          shop_id: shopId, // Use the owner's shop ID
           name,
           address,
           latitude: latitude || null,
@@ -81,7 +75,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Enable default methods for the new branch
-    const { data: methods } = await supabase
+    const { data: methods } = await supabaseAdmin
       .from('shop_methods')
       .select('id')
 
@@ -92,13 +86,13 @@ export async function POST(request: NextRequest) {
         is_enabled: true
       }))
 
-      await supabase
+      await supabaseAdmin
         .from('branch_methods')
         .insert(methodAssignments)
     }
 
     // Enable default service options
-    const { data: options } = await supabase
+    const { data: options } = await supabaseAdmin
       .from('service_options')
       .select('id')
 
@@ -109,7 +103,7 @@ export async function POST(request: NextRequest) {
         is_enabled: true
       }))
 
-      await supabase
+      await supabaseAdmin
         .from('branch_service_options')
         .insert(optionAssignments)
     }
@@ -123,7 +117,7 @@ export async function POST(request: NextRequest) {
       is_closed: dayOfWeek === 0 // Closed on Sunday by default
     }))
 
-    await supabase
+    await supabaseAdmin
       .from('branch_operating_hours')
       .insert(operatingHours)
 
@@ -136,14 +130,15 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     console.error('Error in branch creation:', error)
     return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
+      { error: error.message || 'Internal server error' },
+      { status: error.status || 500 }
     )
   }
 }
 
 export async function PUT(request: NextRequest) {
   try {
+    const { userId, shopId } = await requireOwner()
     const { id, name, address, latitude, longitude, is_active } = await request.json()
 
     if (!id) {
@@ -153,13 +148,22 @@ export async function PUT(request: NextRequest) {
       )
     }
 
-    if (!name && !address && latitude === undefined && longitude === undefined && is_active === undefined) {
+    // Verify the branch belongs to owner's shop
+    const { data: branchCheck, error: checkError } = await supabaseAdmin
+      .from('shop_branches')
+      .select('id')
+      .eq('id', id)
+      .eq('shop_id', shopId)
+      .single()
+
+    if (checkError || !branchCheck) {
       return NextResponse.json(
-        { error: 'No fields to update' },
-        { status: 400 }
+        { error: 'Branch not found or access denied' },
+        { status: 404 }
       )
     }
 
+    // Update the branch
     const updateData: any = {}
     if (name) updateData.name = name
     if (address) updateData.address = address
@@ -167,8 +171,7 @@ export async function PUT(request: NextRequest) {
     if (longitude !== undefined) updateData.longitude = longitude
     if (is_active !== undefined) updateData.is_active = is_active
 
-    // Update the branch
-    const { data: branch, error: branchError } = await supabase
+    const { data: branch, error: branchError } = await supabaseAdmin
       .from('shop_branches')
       .update(updateData)
       .eq('id', id)
@@ -192,14 +195,15 @@ export async function PUT(request: NextRequest) {
   } catch (error: any) {
     console.error('Error in branch update:', error)
     return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
+      { error: error.message || 'Internal server error' },
+      { status: error.status || 500 }
     )
   }
 }
 
 export async function DELETE(request: NextRequest) {
   try {
+    const { userId, shopId } = await requireOwner()
     const { searchParams } = new URL(request.url)
     const branchId = searchParams.get('id')
 
@@ -210,8 +214,23 @@ export async function DELETE(request: NextRequest) {
       )
     }
 
+    // Verify the branch belongs to owner's shop
+    const { data: branchCheck, error: checkError } = await supabaseAdmin
+      .from('shop_branches')
+      .select('id')
+      .eq('id', branchId)
+      .eq('shop_id', shopId)
+      .single()
+
+    if (checkError || !branchCheck) {
+      return NextResponse.json(
+        { error: 'Branch not found or access denied' },
+        { status: 404 }
+      )
+    }
+
     // Check if there are any orders associated with this branch
-    const { data: orders, error: ordersError } = await supabase
+    const { data: orders, error: ordersError } = await supabaseAdmin
       .from('orders')
       .select('id')
       .eq('branch_id', branchId)
@@ -232,8 +251,8 @@ export async function DELETE(request: NextRequest) {
       )
     }
 
-    // Use a transaction to delete all related records
-    const { error: deleteError } = await supabase
+    // Delete the branch
+    const { error: deleteError } = await supabaseAdmin
       .from('shop_branches')
       .delete()
       .eq('id', branchId)
@@ -246,9 +265,6 @@ export async function DELETE(request: NextRequest) {
       )
     }
 
-    // Note: Due to foreign key constraints with CASCADE, related records in 
-    // branch_contacts, branch_operating_hours, branch_methods, etc. will be automatically deleted
-
     return NextResponse.json({ 
       success: true,
       message: 'Branch deleted successfully' 
@@ -257,8 +273,8 @@ export async function DELETE(request: NextRequest) {
   } catch (error: any) {
     console.error('Error in branch deletion:', error)
     return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
+      { error: error.message || 'Internal server error' },
+      { status: error.status || 500 }
     )
   }
 }

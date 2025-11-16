@@ -1,31 +1,22 @@
 // app/api/admin/users/[id]/route.ts
-import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
-
-// Create a fresh admin client for each request to avoid session issues
-const createAdminClient = () => {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
-  
-  return createClient(supabaseUrl, supabaseServiceKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-      detectSessionInUrl: false
-    }
-  })
-}
+import { supabaseAdmin } from '@/lib/supabaseAdmin'
+import { verifyAdminAccess } from '@/lib/auth-utils'
 
 export async function DELETE(
   request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: { id: string } }  // ✅ Remove Promise wrapper
 ) {
-  const supabaseAdmin = createAdminClient()
-  
   try {
-    const { id } = await params;
+    // 🔒 STEP 1: Use your existing auth utility
+    const authResult = await verifyAdminAccess()
+    if (!authResult.authorized) {
+      return NextResponse.json({ error: authResult.error }, { status: authResult.status })
+    }
 
-    // Validate ID
+    const { id } = params;
+
+    // 🔒 STEP 2: Input validation
     if (!id || typeof id !== 'string' || id.length === 0) {
       return NextResponse.json(
         { error: "Invalid user ID" },
@@ -33,115 +24,203 @@ export async function DELETE(
       );
     }
 
-    console.log('Starting hard delete for user:', id);
-
-    // Test the service role connection with a simple query
-    console.log('Testing service role connection...');
-    const { data: testData, error: testError } = await supabaseAdmin
-      .from('users')
-      .select('count')
-      .limit(1);
-
-    if (testError) {
-      console.error('Service role test failed:', testError);
+    // UUID format validation
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(id)) {
       return NextResponse.json(
-        { error: `Service authentication failed: ${testError.message}` },
+        { error: "Invalid user ID format" },
+        { status: 400 }
+      );
+    }
+
+    // 🔒 STEP 3: Prevent self-deletion
+    if (id === authResult.userId) {
+      return NextResponse.json(
+        { error: "Cannot delete your own account" },
+        { status: 400 }
+      );
+    }
+
+    // 🔒 STEP 4: Verify target user exists and check permissions
+    const { data: targetUserRoles, error: targetUserError } = await supabaseAdmin
+      .from("user_roles")
+      .select(`
+        user_id,
+        roles (
+          name
+        )
+      `)
+      .eq("user_id", id)
+
+    if (targetUserError) {
+      return NextResponse.json(
+        { error: "Failed to verify user" },
         { status: 500 }
       );
     }
-    console.log('Service role connection successful');
 
-    // STEP 1: Remove shop ownership
-    console.log('Removing shop ownership...');
+    // Check if target user exists
+    if (!targetUserRoles || targetUserRoles.length === 0) {
+      return NextResponse.json(
+        { error: "User not found" },
+        { status: 404 }
+      );
+    }
+
+    // Extract target user roles
+    const targetUserRoleNames = (targetUserRoles as any[]).flatMap((userRole: any) => {
+      const roles = userRole.roles;
+      if (Array.isArray(roles)) {
+        return roles.map((role: any) => role.name);
+      }
+      return roles?.name ? [roles.name] : [];
+    }).filter(Boolean);
+    
+    // Get current admin's roles to check permissions
+    const { data: adminRoles, error: adminRolesError } = await supabaseAdmin
+      .from("user_roles")
+      .select(`
+        user_id,
+        roles (
+          name
+        )
+      `)
+      .eq("user_id", authResult.userId)
+
+    if (adminRolesError) {
+      return NextResponse.json(
+        { error: "Failed to verify admin permissions" },
+        { status: 500 }
+      );
+    }
+
+    const adminRoleNames = (adminRoles as any[])?.flatMap((userRole: any) => {
+      const roles = userRole.roles;
+      if (Array.isArray(roles)) {
+        return roles.map((role: any) => role.name);
+      }
+      return roles?.name ? [roles.name] : [];
+    }).filter(Boolean) || [];
+
+    // Prevent deletion of other admins
+    const targetIsAdmin = targetUserRoleNames.some(roleName => 
+      roleName === 'admin' || roleName === 'superadmin'
+    );
+    
+    // Only superadmin can delete other admins
+    const isSuperAdmin = adminRoleNames.includes('superadmin');
+    
+    if (targetIsAdmin && !isSuperAdmin) {
+      return NextResponse.json(
+        { error: "Only superadmin can delete admin users" },
+        { status: 403 }
+      );
+    }
+
+    // 🔒 STEP 5: Perform deletion with proper cleanup order
+
+    // 1. Remove shop ownership
     const { error: shopUpdateError } = await supabaseAdmin
       .from('shops')
       .update({ owner_id: null })
       .eq('owner_id', id);
 
     if (shopUpdateError) {
-      console.error('Failed to remove shop ownership:', shopUpdateError);
-      // Continue anyway - we'll try to delete the user regardless
-    } else {
-      console.log('Shop ownership removed');
+      // Continue - user might not own a shop
     }
 
-    // STEP 2: Delete shop assignments
-    console.log('Deleting shop assignments...');
+    // 2. Delete shop assignments
     const { error: assignmentsError } = await supabaseAdmin
       .from('shop_user_assignments')
       .delete()
       .eq('user_id', id);
 
     if (assignmentsError) {
-      console.error('Failed to delete shop assignments:', assignmentsError);
-    } else {
-      console.log('Shop assignments deleted');
+      // Continue - user might not have assignments
     }
 
-    // STEP 3: Delete user roles
-    console.log('Deleting user roles...');
+    // 3. Delete from related tables to avoid foreign key constraints
+    const cleanupOperations = [
+      // Delete user's orders
+      supabaseAdmin.from('orders').delete().eq('customer_id', id),
+      // Delete user's order history
+      supabaseAdmin.from('order_history').delete().eq('customer_id', id),
+      // Delete user's notifications
+      supabaseAdmin.from('notifications').delete().eq('user_id', id),
+      // Delete user's push tokens
+      supabaseAdmin.from('user_push_tokens').delete().eq('user_id', id),
+      // Delete user's deliveries (as driver)
+      supabaseAdmin.from('deliveries').delete().eq('driver_id', id),
+    ];
+
+    // Execute all cleanup operations
+    await Promise.allSettled(cleanupOperations);
+
+    // 4. Delete user roles
     const { error: rolesError } = await supabaseAdmin
       .from('user_roles')
       .delete()
       .eq('user_id', id);
 
     if (rolesError) {
-      console.error('Failed to delete user roles:', rolesError);
-    } else {
-      console.log('User roles deleted');
+      // Continue with deletion
     }
 
-    // STEP 4: Delete user profile
-    console.log('Deleting user profile...');
+    // 5. Delete user profile
     const { error: profileError } = await supabaseAdmin
       .from('users')
       .delete()
       .eq('id', id);
 
     if (profileError) {
-      console.error('Failed to delete user profile:', profileError);
-      // Continue to auth deletion - the profile might not exist
-    } else {
-      console.log('User profile deleted');
+      // Continue to auth deletion
     }
 
-    // STEP 5: Delete auth user (most important step)
-    console.log('Deleting auth user...');
+    // 6. Delete auth user (most important step)
     const { error: authDeleteError } = await supabaseAdmin.auth.admin.deleteUser(id);
 
     if (authDeleteError) {
-      console.error('Auth deletion failed:', authDeleteError);
-      
-      // Check if it's a "not found" error, which might be acceptable
+      // Check if it's a "not found" error
       if (authDeleteError.message.includes('not found') || authDeleteError.status === 404) {
-        console.log('Auth user not found, but other data was cleaned up');
         return NextResponse.json({ 
           success: true,
           message: "User data cleaned up (auth user not found)"
         });
       }
       
-      throw new Error(`Auth deletion failed: ${authDeleteError.message}`);
+      return NextResponse.json(
+        { error: "Failed to delete user account" },
+        { status: 500 }
+      );
     }
 
-    console.log('Auth user deleted successfully');
-    
+    // 🔒 STEP 6: Audit log the deletion
+    try {
+      await supabaseAdmin
+        .from('admin_audit_logs')
+        .insert({
+          admin_id: authResult.userId,
+          action: 'user_deletion',
+          target_user_id: id,
+          target_roles: targetUserRoleNames,
+          admin_roles: adminRoleNames,
+          description: `Admin deleted user with roles: ${targetUserRoleNames.join(', ')}`,
+          ip_address: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown',
+          user_agent: request.headers.get('user-agent') || 'unknown',
+          created_at: new Date().toISOString()
+        });
+    } catch (auditError) {
+      // Don't fail the deletion if audit logging fails
+    }
+
     return NextResponse.json({ 
       success: true,
-      message: "User completely deleted from all systems"
+      message: "User successfully deleted from all systems"
     });
 
   } catch (error: any) {
-    console.error('Hard delete error:', error);
-    
     return NextResponse.json(
-      { 
-        error: error.message || "Failed to delete user",
-        details: process.env.NODE_ENV === 'development' ? {
-          message: error.message,
-          stack: error.stack
-        } : undefined
-      },
+      { error: "Failed to delete user" },
       { status: 500 }
     );
   }

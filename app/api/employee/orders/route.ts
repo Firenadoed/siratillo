@@ -171,7 +171,7 @@ export async function GET(request: NextRequest) {
 
     console.log('✅ Employee assignment verified');
 
-    // 🔄 UPDATED: Get ALL orders with their order_items for proper pickup handling
+    // 🔄 UPDATED: Get ALL orders with their order_items for proper three-type handling
     console.log('📥 Fetching orders for branch:', branchId);
     const { data: allOrders, error: ordersError } = await supabaseAdmin
       .from('orders')
@@ -200,22 +200,30 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to fetch orders' }, { status: 500 });
     }
 
-    // 🔄 UPDATED: Filter pending orders - includes pickup orders waiting for driver
+    // 🔄 UPDATED: Filter pending orders for all three order types
     const pendingOrders = allOrders?.filter(order => {
       const orderItem = order.order_items?.[0];
       const orderMethod = order.method?.code;
       
-      // No order_items = pending (delivery/dropoff)
+      // No order_items = pending (all order types)
       if (!orderItem) return true;
       
-      // Pickup orders: show in inbox until weighed (waiting_for_pickup or collected)
+      // PICK UP orders: show in inbox until weighed (collected status)
       if (orderMethod === 'pickup') {
-        return orderItem.status === 'waiting_for_pickup' || 
-               orderItem.status === 'collected';
+        return orderItem.status === 'collected'; // Only show when collected by driver
       }
       
-      // Delivery/Dropoff: show in inbox if no weight set yet
-      return !orderItem.quantity;
+      // DELIVERY orders: show in inbox if no weight set yet
+      if (orderMethod === 'delivery') {
+        return !orderItem.quantity; // No weight set yet
+      }
+      
+      // DROP OFF orders: show in inbox if no weight set yet
+      if (orderMethod === 'dropoff') {
+        return !orderItem.quantity; // No weight set yet
+      }
+      
+      return false;
     }) || [];
 
     // 2. WORK QUEUE: Get active order_items with order data
@@ -257,29 +265,32 @@ export async function GET(request: NextRequest) {
       completed: completedOrders?.length || 0
     });
 
-    // 🔄 UPDATED: Transform data with NEW status mapping
+    // 🔄 UPDATED: Transform data with THREE ORDER TYPE status mapping
     const transformOrderItem = (orderItem: any) => {
       const order = orderItem.order;
       const orderMethod = order.method?.code;
       
-      // 🔥 FIXED: Different status mapping based on order method
+      // 🔥 FIXED: Different status mapping based on THREE order methods
       let frontendStatus: 'pending' | 'in_shop' | 'delivering' | 'done';
       
       switch (orderItem.status) {
         case 'waiting_for_pickup':
+          frontendStatus = 'pending'; // Show in INBOX for pickup orders
+          break;
         case 'collected':
-          frontendStatus = 'pending'; // Show in INBOX until weighed
+          frontendStatus = 'pending'; // Show in INBOX for pickup orders (ready to weigh)
           break;
         case 'in_progress':
           frontendStatus = 'in_shop'; // Show in WORK QUEUE
           break;
         case 'ready_for_delivery':
-          // For dropoff: "ready_for_delivery" means ready for customer pickup
+          // For pickup: "ready_for_delivery" means ready for driver to return to customer
           // For delivery: "ready_for_delivery" means ready for driver to deliver
-          frontendStatus = orderMethod === 'delivery' ? 'in_shop' : 'in_shop';
+          frontendStatus = 'in_shop'; // Still in shop until driver takes it
           break;
         case 'out_for_delivery':
-          // ONLY delivery orders should show as "delivering"
+          // Only delivery orders should show as "delivering"
+          // Pickup returns don't use "out_for_delivery" status
           frontendStatus = orderMethod === 'delivery' ? 'delivering' : 'in_shop';
           break;
         case 'completed':
@@ -324,10 +335,8 @@ export async function GET(request: NextRequest) {
       
       if (orderItem) {
         db_status = orderItem.status;
-        // For pickup orders with order_items, still show as pending until weighed
-        if (orderMethod === 'pickup') {
-          status = 'pending';
-        }
+        // For all order types with order_items, still show as pending until weighed
+        status = 'pending';
       }
 
       return {
@@ -452,12 +461,12 @@ export async function POST(request: NextRequest) {
       weight: kilo 
     });
 
-    // 🔄 UPDATED: Handle pickup orders differently
+    // 🔄 UPDATED: Handle THREE order types differently
     if (orderMethod === 'pickup') {
-      // For pickup: must be collected before weighing
+      // For PICK UP: must be collected before weighing
       if (!existingOrderItem || existingOrderItem.status !== 'collected') {
         return NextResponse.json({ 
-          error: 'Pickup order not collected yet. Wait for delivery driver.' 
+          error: 'Pickup order not collected yet. Wait for delivery driver to collect from customer.' 
         }, { status: 400 });
       }
 
@@ -468,7 +477,8 @@ export async function POST(request: NextRequest) {
           quantity: kilo,
           price_per_unit: pricePerKg,
           subtotal: subtotal,
-          status: 'in_progress' // Move to washing stage
+          status: 'in_progress', // Move to washing stage
+          started_at: new Date().toISOString()
         })
         .eq('id', existingOrderItem.id)
         .select(`
@@ -497,7 +507,7 @@ export async function POST(request: NextRequest) {
       await createOrderNotification({
         userId: orderItem.order.customer_id,
         title: 'Order Confirmed! ✅',
-        body: `Your laundry order has been confirmed. Weight: ${kilo}kg. Total: ₱${subtotal.toFixed(2)}`,
+        body: `Your pickup laundry order has been weighed. Weight: ${kilo}kg. Total: ₱${subtotal.toFixed(2)}`,
         payload: {
           order_id: orderItem.order.id,
           order_status: 'confirmed',
@@ -517,7 +527,7 @@ export async function POST(request: NextRequest) {
       });
 
     } else {
-      // For delivery/dropoff: create new order_items entry
+      // For DELIVERY/DROP OFF: create new order_items entry
       const { data: orderItem, error: insertError } = await supabaseAdmin
         .from('order_items')
         .insert({
@@ -552,10 +562,12 @@ export async function POST(request: NextRequest) {
       console.log('✅ [POST] Order moved to work queue:', orderItem.id);
 
       // 🔔 CREATE NOTIFICATION WITH PUSH
+      const methodLabel = orderMethod === 'delivery' ? 'delivery' : 'dropoff';
+      
       await createOrderNotification({
         userId: orderItem.order.customer_id,
         title: 'Order Confirmed! ✅',
-        body: `Your laundry order has been confirmed. Weight: ${kilo}kg. Total: ₱${subtotal.toFixed(2)}`,
+        body: `Your ${methodLabel} laundry order has been confirmed. Weight: ${kilo}kg. Total: ₱${subtotal.toFixed(2)}`,
         payload: {
           order_id: orderItem.order.id,
           order_status: 'confirmed',
@@ -648,7 +660,7 @@ export async function PATCH(request: NextRequest) {
       customer_id: orderItem.order.customer_id
     });
 
-    // 🔥 FIXED: DIFFERENT STATUS PROGRESSION BASED ON ORDER METHOD
+    // 🔥 FIXED: COMPLETE THREE ORDER TYPE WORKFLOW WITH CORRECT STATUS PROGRESSION
     let nextStatus: string;
 
     if (orderMethod === 'dropoff') {
@@ -660,11 +672,12 @@ export async function PATCH(request: NextRequest) {
       }
     } 
     else if (orderMethod === 'pickup') {
-      // 🔄 PICKUP WORKFLOW: in_progress → ready_for_delivery → completed
+      // 🔥 CORRECTED PICKUP WORKFLOW: 
+      // waiting_for_pickup → collected → in_progress → ready_for_delivery → completed
       if (currentStatus === 'in_progress') {
-        nextStatus = 'ready_for_delivery'; // Ready for customer pickup
+        nextStatus = 'ready_for_delivery'; // Ready for driver to return to customer
       } else if (currentStatus === 'ready_for_delivery') {
-        nextStatus = 'completed'; // Customer picks up (no out_for_delivery)
+        nextStatus = 'completed'; // Returned to customer (no out_for_delivery for pickup returns)
       } else {
         nextStatus = currentStatus;
       }
@@ -721,14 +734,14 @@ export async function PATCH(request: NextRequest) {
     // 🔔 CREATE NOTIFICATIONS WITH PUSH BASED ON STATUS CHANGE AND ORDER METHOD
     if (nextStatus === 'ready_for_delivery') {
       if (orderMethod === 'pickup') {
-        // Pickup: Ready for customer pickup
+        // Pickup: Ready for driver to return to customer
         await createOrderNotification({
           userId: orderItem.order.customer_id,
-          title: 'Ready for Pickup! 📦',
-          body: `Your laundry is cleaned, packed, and ready for pickup at the shop.`,
+          title: 'Ready for Return! 📦',
+          body: `Your laundry is cleaned, packed, and ready for return delivery.`,
           payload: {
             order_id: orderItem.order.id,
-            order_status: 'ready_for_pickup',
+            order_status: 'ready_for_return',
             shop_name: orderItem.order.branch?.name,
             branch_name: orderItem.order.branch?.address
           }
@@ -809,7 +822,7 @@ export async function PATCH(request: NextRequest) {
         if (orderMethod === 'dropoff') {
           completionBody = `Your dropoff laundry order has been completed! You can pick it up at the shop.`;
         } else if (orderMethod === 'pickup') {
-          completionBody = `Your pickup laundry order has been completed and is ready for collection!`;
+          completionBody = `Your pickup laundry order has been completed and returned to you!`;
         } else if (orderMethod === 'delivery') {
           completionBody = `Your delivery laundry order has been completed and delivered!`;
         }
@@ -872,7 +885,7 @@ export async function PATCH(request: NextRequest) {
   }
 }
 
-// 🔥 FIXED: Manual Orders API Route - Only creates order, no order_item
+// 🔥 FIXED: Manual Orders API Route - Handles all three order types
 export async function PUT(request: NextRequest) {
   try {
     console.log('🔄 [MANUAL ORDER] Starting manual order creation API');
@@ -939,71 +952,138 @@ export async function PUT(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // Start transaction - create order only (no order_item)
-    console.log('💾 [MANUAL ORDER] Creating order record...');
+    // 🔄 UPDATED: Handle PICKUP orders differently - create order_item immediately
+    let createdOrder = null;
+    let orderItemData = null;
     
-    // ✅ FIXED: Create only the order, no order_item with weight
-    const { data: order, error: orderError } = await supabaseAdmin
-      .from('orders')
-      .insert({
-        branch_id: branchId,
-        customer_name: customerName,
-        customer_contact: customerPhone || null,
-        method_id: methodData.id,
-        delivery_location: deliveryAddress || null,
-        delivery_latitude: deliveryLat || null,
-        delivery_longitude: deliveryLng || null,
-        service_id: serviceId,
-        detergent_id: detergentId || null,
-        softener_id: softenerId || null,
-        created_at: new Date().toISOString(),
-        customer_id: null // Manual orders don't have registered customers
-      })
-      .select()
-      .single();
+    if (method === 'pickup') {
+      // For PICKUP orders, create order_item with 'waiting_for_pickup' status
+      console.log('🚚 [MANUAL ORDER] Creating pickup order with driver assignment needed');
+      
+      // First create the order
+      const { data: order, error: orderError } = await supabaseAdmin
+        .from('orders')
+        .insert({
+          branch_id: branchId,
+          customer_name: customerName,
+          customer_contact: customerPhone || null,
+          method_id: methodData.id,
+          delivery_location: deliveryAddress || null,
+          delivery_latitude: deliveryLat || null,
+          delivery_longitude: deliveryLng || null,
+          service_id: serviceId,
+          detergent_id: detergentId || null,
+          softener_id: softenerId || null,
+          created_at: new Date().toISOString(),
+          customer_id: null // Manual orders don't have registered customers
+        })
+        .select()
+        .single();
 
-    if (orderError) {
-      console.error('❌ [MANUAL ORDER] Error creating order:', orderError);
-      return NextResponse.json({ 
-        error: 'Failed to create order: ' + orderError.message 
-      }, { status: 500 });
+      if (orderError) {
+        console.error('❌ [MANUAL ORDER] Error creating order:', orderError);
+        return NextResponse.json({ 
+          error: 'Failed to create order: ' + orderError.message 
+        }, { status: 500 });
+      }
+
+      createdOrder = order; // ✅ Store the order for later use
+
+      // Then create order_item for pickup
+      const { data: orderItem, error: itemError } = await supabaseAdmin
+        .from('order_items')
+        .insert({
+          order_id: order.id,
+          service_id: serviceId,
+          status: 'waiting_for_pickup', // Needs driver to collect
+          created_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+
+      if (itemError) {
+        console.error('❌ [MANUAL ORDER] Error creating order item:', itemError);
+        return NextResponse.json({ 
+          error: 'Failed to create pickup order item: ' + itemError.message 
+        }, { status: 500 });
+      }
+
+      orderItemData = orderItem;
+      console.log('✅ [MANUAL ORDER] Pickup order created with driver assignment needed');
+
+    } else {
+      // For DELIVERY and DROP OFF: create order only (no order_item until weighed)
+      console.log('💾 [MANUAL ORDER] Creating order record...');
+      
+      const { data: order, error: orderError } = await supabaseAdmin
+        .from('orders')
+        .insert({
+          branch_id: branchId,
+          customer_name: customerName,
+          customer_contact: customerPhone || null,
+          method_id: methodData.id,
+          delivery_location: deliveryAddress || null,
+          delivery_latitude: deliveryLat || null,
+          delivery_longitude: deliveryLng || null,
+          service_id: serviceId,
+          detergent_id: detergentId || null,
+          softener_id: softenerId || null,
+          created_at: new Date().toISOString(),
+          customer_id: null // Manual orders don't have registered customers
+        })
+        .select()
+        .single();
+
+      if (orderError) {
+        console.error('❌ [MANUAL ORDER] Error creating order:', orderError);
+        return NextResponse.json({ 
+          error: 'Failed to create order: ' + orderError.message 
+        }, { status: 500 });
+      }
+
+      createdOrder = order; // ✅ Store the order for later use
+      console.log('✅ [MANUAL ORDER] Order created:', order.id);
     }
 
-    console.log('✅ [MANUAL ORDER] Order created:', order.id);
+    // ✅ FIXED: Now we can use createdOrder which is defined in both code paths
+    if (createdOrder) {
+      // Log the manual order creation
+      await supabaseAdmin
+        .from('employee_actions')
+        .insert({
+          employee_id: user.id,
+          branch_id: branchId,
+          action_type: 'manual_order_creation',
+          description: `Created manual ${method} order for ${customerName}`,
+          order_id: createdOrder.id,  // ✅ Now using createdOrder instead of order
+          metadata: {
+            customer_name: customerName,
+            method: method,
+            service_id: serviceId,
+            delivery_lat: deliveryLat,
+            delivery_lng: deliveryLng
+          },
+          created_at: new Date().toISOString()
+        });
 
-    // Log the manual order creation
-    await supabaseAdmin
-      .from('employee_actions')
-      .insert({
-        employee_id: user.id,
-        branch_id: branchId,
-        action_type: 'manual_order_creation',
-        description: `Created manual order for ${customerName}`,
-        order_id: order.id,
-        metadata: {
+      console.log('🎉 [MANUAL ORDER] Manual order creation completed successfully');
+
+      return NextResponse.json({ 
+        success: true,
+        message: 'Manual order created successfully',
+        order: {
+          id: createdOrder.id,  // ✅ Now using createdOrder instead of order
           customer_name: customerName,
           method: method,
           service_id: serviceId,
-          delivery_lat: deliveryLat,
-          delivery_lng: deliveryLng
-        },
-        created_at: new Date().toISOString()
+          delivery_latitude: deliveryLat,
+          delivery_longitude: deliveryLng,
+          order_item: orderItemData
+        }
       });
-
-    console.log('🎉 [MANUAL ORDER] Manual order creation completed successfully');
-
-    return NextResponse.json({ 
-      success: true,
-      message: 'Manual order created successfully',
-      order: {
-        id: order.id,
-        customer_name: customerName,
-        method: method,
-        service_id: serviceId,
-        delivery_latitude: deliveryLat,
-        delivery_longitude: deliveryLng
-      }
-    });
+    } else {
+      throw new Error('Failed to create order - no order was created');
+    }
 
   } catch (error: any) {
     console.error('💥 [MANUAL ORDER] Manual order creation error:', error);

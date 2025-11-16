@@ -3,13 +3,23 @@ import { NextRequest, NextResponse } from 'next/server';
 import { sendEmailNodemailer } from '@/lib/nodemailer';
 import { createClient } from '@supabase/supabase-js';
 
+// 🔒 Use a client with limited permissions instead of service role
 const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_ANON_KEY! // Use anonymous key instead of service role
 );
 
 export async function POST(request: NextRequest) {
   try {
+    // 🔒 Request size validation
+    const contentLength = request.headers.get('content-length');
+    if (contentLength && parseInt(contentLength) > 10000) { // 10KB limit
+      return NextResponse.json(
+        { error: 'Request too large' },
+        { status: 413 }
+      );
+    }
+
     const body = await request.json();
     
     const {
@@ -23,52 +33,127 @@ export async function POST(request: NextRequest) {
       locationAddress,
     } = body;
 
-    // Validate required fields
-    if (!name || !email || !contact || !shopName || !shopAddress || !latitude || !longitude) {
+    // 🔒 Enhanced input validation
+    if (!name?.trim() || !email?.trim() || !contact?.trim() || !shopName?.trim() || !shopAddress?.trim() || !latitude || !longitude) {
       return NextResponse.json(
         { error: 'All fields are required' },
         { status: 400 }
       );
     }
 
-    // Validate email format
+    // Length validation
+    if (name.trim().length > 100) {
+      return NextResponse.json({ error: 'Name too long' }, { status: 400 });
+    }
+    if (email.trim().length > 100) {
+      return NextResponse.json({ error: 'Email too long' }, { status: 400 });
+    }
+    if (contact.trim().length > 20) {
+      return NextResponse.json({ error: 'Contact too long' }, { status: 400 });
+    }
+    if (shopName.trim().length > 100) {
+      return NextResponse.json({ error: 'Shop name too long' }, { status: 400 });
+    }
+    if (shopAddress.trim().length > 200) {
+      return NextResponse.json({ error: 'Shop address too long' }, { status: 400 });
+    }
+
+    // Email format validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
+    if (!emailRegex.test(email.trim())) {
       return NextResponse.json(
         { error: 'Please provide a valid email address' },
         { status: 400 }
       );
     }
 
-    console.log('🔍 Checking for existing accounts...');
-
-    // 1. Check if email already exists in users table (already an owner)
-    const { data: existingUser, error: userError } = await supabase
-      .from('users')
-      .select('id, email')
-      .eq('email', email.trim().toLowerCase())
-      .single();
-
-    if (userError && userError.code !== 'PGRST116') { // PGRST116 = no rows returned
-      console.error('Error checking existing user:', userError);
-    }
-
-    if (existingUser) {
+    // Enhanced coordinate validation
+    let lat: number, lng: number;
+    try {
+      // Handle both string and number inputs
+      lat = typeof latitude === 'string' ? parseFloat(latitude) : latitude;
+      lng = typeof longitude === 'string' ? parseFloat(longitude) : longitude;
+      
+      // Check if conversion resulted in valid numbers
+      if (isNaN(lat) || isNaN(lng)) {
+        return NextResponse.json(
+          { error: 'Coordinates must be valid numbers' },
+          { status: 400 }
+        );
+      }
+      
+      // Validate coordinate ranges
+      if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+        return NextResponse.json(
+          { 
+            error: 'Invalid coordinate values. Latitude must be between -90 and 90, longitude between -180 and 180' 
+          },
+          { status: 400 }
+        );
+      }
+    } catch (error) {
       return NextResponse.json(
-        { error: 'This email is already registered as a shop owner' },
-        { status: 409 }
+        { error: 'Invalid coordinate format' },
+        { status: 400 }
       );
     }
 
-    // 2. Check if shop name already exists in shops table
-    const { data: existingShop, error: shopError } = await supabase
-      .from('shops')
-      .select('id, name')
-      .ilike('name', shopName.trim()) // Case-insensitive search
-      .single();
+    // 🔒 Check for existing accounts with proper error handling
+    let existingUser, existingShop, pendingRequest, pendingShopRequest;
 
-    if (shopError && shopError.code !== 'PGRST116') {
-      console.error('Error checking existing shop:', shopError);
+    try {
+      // 1. Check if email already exists in users table
+      const userResult = await supabase
+        .from('users')
+        .select('id')
+        .eq('email', email.trim().toLowerCase())
+        .maybeSingle();
+
+      existingUser = userResult.data;
+
+      // 2. Check if shop name already exists
+      const shopResult = await supabase
+        .from('shops')
+        .select('id')
+        .ilike('name', shopName.trim())
+        .maybeSingle();
+
+      existingShop = shopResult.data;
+
+      // 3. Check for pending requests with this email
+      const pendingResult = await supabase
+        .from('account_requests')
+        .select('id')
+        .eq('email', email.trim().toLowerCase())
+        .eq('status', 'pending')
+        .maybeSingle();
+
+      pendingRequest = pendingResult.data;
+
+      // 4. Check for pending requests with this shop name
+      const pendingShopResult = await supabase
+        .from('account_requests')
+        .select('id')
+        .ilike('shop_name', shopName.trim())
+        .eq('status', 'pending')
+        .maybeSingle();
+
+      pendingShopRequest = pendingShopResult.data;
+
+    } catch (dbError) {
+      // Use generic error message to avoid information disclosure
+      return NextResponse.json(
+        { error: 'Failed to validate request' },
+        { status: 500 }
+      );
+    }
+
+    // Return appropriate error messages
+    if (existingUser) {
+      return NextResponse.json(
+        { error: 'This email is already registered' },
+        { status: 409 }
+      );
     }
 
     if (existingShop) {
@@ -78,35 +163,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 3. Check if there's already a pending request with this email
-    const { data: pendingRequest, error: pendingError } = await supabase
-      .from('account_requests')
-      .select('id, email, status')
-      .eq('email', email.trim().toLowerCase())
-      .eq('status', 'pending')
-      .single();
-
-    if (pendingError && pendingError.code !== 'PGRST116') {
-      console.error('Error checking pending requests:', pendingError);
-    }
-
     if (pendingRequest) {
       return NextResponse.json(
-        { error: 'You already have a pending account request. Please wait for our team to review it.' },
+        { error: 'You already have a pending account request' },
         { status: 409 }
       );
-    }
-
-    // 4. Check if there's already a pending request with this shop name
-    const { data: pendingShopRequest, error: pendingShopError } = await supabase
-      .from('account_requests')
-      .select('id, shop_name, status')
-      .ilike('shop_name', shopName.trim())
-      .eq('status', 'pending')
-      .single();
-
-    if (pendingShopError && pendingShopError.code !== 'PGRST116') {
-      console.error('Error checking pending shop requests:', pendingShopError);
     }
 
     if (pendingShopRequest) {
@@ -116,10 +177,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log('✅ No duplicates found, creating account request...');
-
-    // ✅ SAVE TO SUPABASE DATABASE
-    const { data: accountRequest, error: dbError } = await supabase
+    // 🔒 Save to database - REMOVED .select().single() to fix RLS permission issue
+    const { error: dbError } = await supabase
       .from('account_requests')
       .insert([
         {
@@ -128,24 +187,36 @@ export async function POST(request: NextRequest) {
           contact: contact.trim(),
           shop_name: shopName.trim(),
           shop_address: shopAddress.trim(),
-          latitude: parseFloat(latitude),
-          longitude: parseFloat(longitude),
+          latitude: lat, // Use the validated coordinates
+          longitude: lng,
           location_address: locationAddress?.trim() || null,
           status: 'pending'
         }
-      ])
-      .select()
-      .single();
+      ]);
 
     if (dbError) {
       console.error('Database error:', dbError);
+      
+      // More specific error messages
+      if (dbError.code === '42501') {
+        return NextResponse.json(
+          { error: 'Permission denied. Please check RLS policies.' },
+          { status: 500 }
+        );
+      }
+      
+      if (dbError.code === '23505') { // Unique violation
+        return NextResponse.json(
+          { error: 'Duplicate entry found' },
+          { status: 409 }
+        );
+      }
+      
       return NextResponse.json(
-        { error: 'Failed to save account request' },
+        { error: 'Failed to submit account request' },
         { status: 500 }
       );
     }
-
-    console.log('✅ Account request saved, sending confirmation email...');
 
     // Send confirmation email to user
     try {
@@ -176,37 +247,30 @@ export async function POST(request: NextRequest) {
               <li>If approved, you'll get your shop dashboard access</li>
             </ol>
             
-            <p>If you have any questions or need to update your application details, please contact us at support@laundryapp.com</p>
+            <p>If you have any questions, please contact our support team.</p>
             
             <p>Best regards,<br>
             <strong>The LaundryGo Team</strong></p>
-            
-            <hr style="margin: 30px 0; border: none; border-top: 1px solid #e2e8f0;">
-            <p style="color: #64748b; font-size: 12px; text-align: center;">
-              This is an automated message. Please do not reply to this email.
-            </p>
           </div>
         `
       });
-      console.log('✅ Confirmation email sent successfully');
     } catch (emailError) {
-      console.error('❌ Failed to send confirmation email:', emailError);
       // Don't fail the request if email fails
+      console.error('Failed to send confirmation email:', emailError);
     }
 
     return NextResponse.json(
       { 
         success: true, 
-        message: 'Account request submitted successfully',
-        data: accountRequest
+        message: 'Account request submitted successfully'
       },
       { status: 201 }
     );
 
   } catch (error) {
-    console.error('💥 Account request error:', error);
+    console.error('Unexpected error:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Failed to process request' },
       { status: 500 }
     );
   }

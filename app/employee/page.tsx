@@ -36,7 +36,7 @@ type Order = {
   customer_name: string;
   detergent: string | null;
   softener: string | null;
-  method: "dropoff" | "delivery";
+  method: "dropoff" | "pickup" | "delivery";
   method_label: string;
   kilo: number | null;
   amount: number | null;
@@ -83,7 +83,7 @@ type Softener = {
 };
 
 type Method = {
-  code: "dropoff" | "delivery";
+  code: "dropoff" | "pickup" | "delivery";
   label: string;
   enabled: boolean;
 };
@@ -116,7 +116,7 @@ function ManualOrderCreation({
   // Form state
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
-  const [selectedMethod, setSelectedMethod] = useState<"dropoff" | "delivery">("dropoff");
+  const [selectedMethod, setSelectedMethod] = useState<"dropoff" | "pickup" | "delivery">("dropoff");
   const [deliveryAddress, setDeliveryAddress] = useState("");
   const [deliveryLat, setDeliveryLat] = useState<number | null>(null);
   const [deliveryLng, setDeliveryLng] = useState<number | null>(null);
@@ -157,8 +157,8 @@ function ManualOrderCreation({
       return;
     }
 
-    // For delivery orders, require address and coordinates
-    if (selectedMethod === "delivery") {
+    // For delivery and pickup orders, require address and coordinates
+    if (selectedMethod === "delivery" || selectedMethod === "pickup") {
       if (!deliveryAddress.trim()) {
         toast.error("Please select a delivery location on the map");
         return;
@@ -282,15 +282,15 @@ function ManualOrderCreation({
                   </div>
                 </div>
 
-                {selectedMethod === "delivery" && (
+                {(selectedMethod === "delivery" || selectedMethod === "pickup") && (
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      Delivery Address *
+                      {selectedMethod === "pickup" ? "Pickup Address *" : "Delivery Address *"}
                     </label>
                     <Input
                       value={deliveryAddress}
                       onChange={(e) => setDeliveryAddress(e.target.value)}
-                      placeholder="Search for address or click on map"
+                      placeholder={selectedMethod === "pickup" ? "Enter pickup address" : "Enter delivery address"}
                       className="w-full"
                     />
                   </div>
@@ -355,11 +355,11 @@ function ManualOrderCreation({
               </div>
             </div>
 
-            {/* Delivery Map */}
-            {selectedMethod === "delivery" && (
+            {/* Delivery/Pickup Map */}
+            {(selectedMethod === "delivery" || selectedMethod === "pickup") && (
               <div className="mb-6">
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Select Delivery Location on Map *
+                  Select {selectedMethod === "pickup" ? "Pickup" : "Delivery"} Location on Map *
                 </label>
                 <div className="space-y-3">
                   <div className="h-64 border border-gray-300 rounded-lg overflow-hidden">
@@ -378,7 +378,6 @@ function ManualOrderCreation({
               </div>
             )}
 
-
             {/* Action Buttons */}
             <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
               <Button 
@@ -394,7 +393,7 @@ function ManualOrderCreation({
               </Button>
               <Button
                 onClick={handleCreateOrder}
-                disabled={creating || !customerName.trim() || !selectedService || (selectedMethod === "delivery" && (!deliveryAddress || !deliveryLat || !deliveryLng))}
+                disabled={creating || !customerName.trim() || !selectedService || ((selectedMethod === "delivery" || selectedMethod === "pickup") && (!deliveryAddress || !deliveryLat || !deliveryLng))}
                 className="bg-green-600 hover:bg-green-700 text-white font-semibold shadow-lg"
               >
                 {creating ? (
@@ -432,29 +431,46 @@ function CompactOrderCard({
   const getStatusConfig = (order: Order) => {
     const baseStatus = order.status;
     const dbStatus = order.db_status;
+    const method = order.method;
     
-    if (dbStatus === 'waiting_for_pickup') {
-      return {
-        icon: <UserCheck className="h-4 w-4 text-orange-600" />,
-        color: "bg-orange-50 border-orange-200",
-        text: "Waiting for Driver",
-        description: order.driver_assigned ? 
-          `Driver assigned: ${order.driver_name || 'Unknown'}` : 
-          "Awaiting driver assignment"
-      };
+    // Handle different order types
+    if (method === 'pickup') {
+      if (dbStatus === 'waiting_for_pickup') {
+        return {
+          icon: <UserCheck className="h-4 w-4 text-orange-600" />,
+          color: "bg-orange-50 border-orange-200",
+          text: "Waiting for Driver",
+          description: order.driver_assigned ? 
+            `Driver assigned: ${order.driver_name || 'Unknown'}` : 
+            "Awaiting driver pickup"
+        };
+      }
+      
+      if (dbStatus === 'collected') {
+        return {
+          icon: <Package className="h-4 w-4 text-blue-600" />,
+          color: "bg-blue-50 border-blue-200",
+          text: "Ready to Weigh",
+          description: "Collected by driver"
+        };
+      }
     }
-    
-    if (dbStatus === 'collected') {
-      return {
-        icon: <Package className="h-4 w-4 text-blue-600" />,
-        color: "bg-blue-50 border-blue-200",
-        text: "Ready to Weigh",
-        description: "Collected by driver"
-      };
+
+    if (method === 'delivery') {
+      if (dbStatus === 'waiting_for_pickup') {
+        return {
+          icon: <UserCheck className="h-4 w-4 text-orange-600" />,
+          color: "bg-orange-50 border-orange-200",
+          text: "Ready for Delivery",
+          description: order.driver_assigned ? 
+            `Driver assigned: ${order.driver_name || 'Unknown'}` : 
+            "Awaiting driver assignment"
+        };
+      }
     }
 
     // For dropoff orders that are pending but at the shop
-    if (order.method === 'dropoff' && baseStatus === 'pending') {
+    if (method === 'dropoff' && baseStatus === 'pending') {
       return {
         icon: <Home className="h-4 w-4 text-green-600" />,
         color: "bg-green-50 border-green-200",
@@ -464,7 +480,7 @@ function CompactOrderCard({
     }
 
     // For delivery orders that are pending but at the shop
-    if (order.method === 'delivery' && baseStatus === 'pending' && !dbStatus) {
+    if (method === 'delivery' && baseStatus === 'pending' && !dbStatus) {
       return {
         icon: <Package className="h-4 w-4 text-green-600" />,
         color: "bg-green-50 border-green-200",
@@ -598,7 +614,7 @@ function CompactOrderCard({
   );
 }
 
-// FIXED: Enhanced OrderCard Component with Correct Workflows
+// FIXED: Enhanced OrderCard Component with Three Order Type Workflows
 function OrderCard({ 
   order, 
   onStatusChange,
@@ -655,31 +671,35 @@ function OrderCard({
     }
   };
 
-  // FIXED: Correct next action based on order method
+  // FIXED: Correct next action based on order method and status
   const getNextAction = (order: Order) => {
     const dbStatus = order.db_status;
     const orderMethod = order.method;
     
     if (dbStatus === 'in_progress') {
-      // DROPOFF: goes directly to completed
+      // DROP OFF: goes directly to completed
       if (orderMethod === 'dropoff') {
         return "Mark as Completed";
       }
-      // DELIVERY: goes to ready for delivery
+      // PICK UP: goes to ready for delivery (back to customer)
+      if (orderMethod === 'pickup') {
+        return "Mark Ready for Delivery";
+      }
+      // DELIVER: goes to ready for delivery
       if (orderMethod === 'delivery') {
         return "Mark Ready for Delivery";
       }
     }
     
     if (dbStatus === 'ready_for_delivery') {
-      // DELIVERY: goes to out for delivery
-      if (orderMethod === 'delivery') {
-        return "Start Delivery";
+      // PICK UP & DELIVER: ready for driver to take (no employee action needed)
+      if (orderMethod === 'pickup' || orderMethod === 'delivery') {
+        return "Ready for Driver"; // Informational only
       }
     }
     
     if (dbStatus === 'out_for_delivery') {
-      // DELIVERY: goes to completed
+      // PICK UP & DELIVER: driver has taken delivery - employee can mark as delivered
       return "Mark as Delivered";
     }
     
@@ -694,16 +714,23 @@ function OrderCard({
       return "In Progress - Washing";
     }
     if (dbStatus === 'ready_for_delivery') {
+      if (orderMethod === 'pickup') {
+        return "Ready for Return";
+      }
       return "Ready for Delivery";
     }
     if (dbStatus === 'out_for_delivery') {
+      if (orderMethod === 'pickup') {
+        return "Out for Return";
+      }
       return "Out for Delivery";
     }
     return order.status.replace('_', ' ');
   };
 
+  // FIXED: Only allow status updates for in_progress and out_for_delivery
   const canUpdateStatus = (order: Order) => {
-    const allowedStatuses = ['in_progress', 'ready_for_delivery', 'out_for_delivery'];
+    const allowedStatuses = ['in_progress', 'out_for_delivery'];
     return allowedStatuses.includes(order.db_status || '');
   };
 
@@ -740,8 +767,8 @@ function OrderCard({
               </span>
             </div>
             
-            {/* Driver info for delivery orders */}
-            {order.driver_name && (
+            {/* Driver info for pickup and delivery orders */}
+            {(order.method === 'pickup' || order.method === 'delivery') && order.driver_name && (
               <div className="flex justify-between items-center py-1">
                 <span className="text-gray-600 font-medium">Driver:</span>
                 <span className="font-semibold text-gray-900 whitespace-nowrap">{order.driver_name}</span>
@@ -775,7 +802,8 @@ function OrderCard({
             {order.delivery_location && (
               <div className="flex justify-between items-start py-1">
                 <span className="text-gray-600 font-medium flex-shrink-0 mr-2">
-                  {order.method === 'delivery' ? 'Delivery Address:' : 'Pickup Address:'}
+                  {order.method === 'delivery' ? 'Delivery Address:' : 
+                   order.method === 'pickup' ? 'Pickup Address:' : 'Location:'}
                 </span>
                 <span className="font-semibold text-gray-900 text-right break-words max-w-[200px]">
                   {order.delivery_location}
@@ -810,6 +838,19 @@ function OrderCard({
               </>
             )}
           </Button>
+        )}
+
+        {/* Show informational text for ready_for_delivery status */}
+        {(order.db_status === 'ready_for_delivery' && (order.method === 'pickup' || order.method === 'delivery')) && (
+          <div className="w-full mt-4 p-3 bg-purple-50 border border-purple-200 rounded-lg text-center">
+            <Package className="h-4 w-4 text-purple-600 mx-auto mb-1" />
+            <p className="text-sm text-purple-700 font-medium">
+              {order.method === 'pickup' ? 'Ready for Return' : 'Ready for Delivery'}
+            </p>
+            <p className="text-xs text-purple-600">
+              Waiting for driver to {order.method === 'pickup' ? 'return to customer' : 'take delivery'}
+            </p>
+          </div>
         )}
 
         {/* Show last update time if available */}
@@ -1014,7 +1055,7 @@ function EmployeeContent() {
     } finally {
       setRefreshing(false);
     }
-  }, [isAuthorized, currentShopId]); // REMOVED refreshing dependency
+  }, [isAuthorized, currentShopId]);
 
   // FIXED: Main data loading effect with proper dependencies and cleanup
   useEffect(() => {
@@ -1034,7 +1075,7 @@ function EmployeeContent() {
     };
   }, [isAuthorized, currentShopId, fetchOrders, fetchShopData]);
 
-  // FIXED: Enhanced order filtering - Removed pickup logic
+  // FIXED: Enhanced order filtering for three order types
   const { pendingOrders, ongoingOrders, orderHistory, waitingForDriverOrders } = useMemo(() => {
     if (orders.length === 0) {
       return { 
@@ -1051,27 +1092,36 @@ function EmployeeContent() {
     );
     const history = orders.filter((o) => o.status === "done");
 
-    // Only delivery orders can wait for driver
-    const waitingForDriver = pending.filter(o => 
-      o.method === 'delivery' && o.db_status === 'waiting_for_pickup'
-    );
-
     // Ready to weigh includes:
-    // 1. Dropoff orders that are at the shop (no driver involved)
-    // 2. Delivery orders that are collected by driver OR directly at shop
+    // 1. DROP OFF orders that are at the shop (customer brings to shop)
+    // 2. PICK UP orders that are collected by driver 
+    // 3. DELIVER orders that are at shop without driver
     const readyToWeigh = pending.filter(o => {
-      // Dropoff orders: always ready to weigh (customer brings to shop)
+      // DROP OFF orders: always ready to weigh (customer brings to shop)
       if (o.method === 'dropoff') {
         return true;
       }
       
-      // Delivery orders: either collected by driver or at shop without driver
+      // PICK UP orders: collected by driver
+      if (o.method === 'pickup') {
+        return o.db_status === 'collected';
+      }
+      
+      // DELIVER orders: at shop without driver
       if (o.method === 'delivery') {
-        return o.db_status === 'collected' || !o.db_status || o.db_status === 'pending';
+        return !o.db_status || o.db_status === 'pending';
       }
       
       return false;
     });
+
+    // Waiting for driver includes:
+    // 1. PICK UP orders waiting for driver to collect from customer
+    // 2. DELIVER orders waiting for driver to deliver to customer
+    const waitingForDriver = pending.filter(o => 
+      (o.method === 'pickup' || o.method === 'delivery') && 
+      o.db_status === 'waiting_for_pickup'
+    );
 
     return { 
       pendingOrders: readyToWeigh,
@@ -1105,7 +1155,7 @@ function EmployeeContent() {
     }
   };
 
-  // FIXED: Enhanced weight confirmation - Removed pickup logic
+  // FIXED: Enhanced weight confirmation for three order types
   const handleConfirm = (order: Order) => {
     if (isProcessing(order.id)) {
       return;
@@ -1118,15 +1168,23 @@ function EmployeeContent() {
       status: order.status
     });
 
-    // For delivery orders, check if they need driver collection
-    if (order.method === 'delivery') {
+    // For PICK UP orders, check if they need driver collection
+    if (order.method === 'pickup') {
       if (order.db_status === 'waiting_for_pickup') {
-        toast.error("Order not collected yet. Waiting for delivery driver to pick up.");
+        toast.error("Order not collected yet. Waiting for driver to pick up from customer.");
         return;
       }
     }
 
-    // Dropoff orders are always ready to weigh (customer brings to shop directly)
+    // For DELIVER orders, check if they need driver assignment
+    if (order.method === 'delivery') {
+      if (order.db_status === 'waiting_for_pickup') {
+        toast.error("Order not ready yet. Waiting for delivery driver assignment.");
+        return;
+      }
+    }
+
+    // DROP OFF orders are always ready to weigh (customer brings to shop directly)
 
     addToProcessing(order.id);
     setCurrentOrder(order);
@@ -1202,7 +1260,7 @@ function EmployeeContent() {
     }
   };
 
-  // Enhanced status change
+  // Enhanced status change for three order types
   const handleStatusChange = async (order: Order) => {
     if (!order.order_item_id) {
       toast.error("This order cannot be updated yet");
@@ -1441,7 +1499,7 @@ function EmployeeContent() {
                     </div>
                     <div>
                       <h2 className="text-lg font-bold text-gray-900">
-                        Awaiting Pickup
+                        Awaiting Driver
                       </h2>
                       <p className="text-orange-700 text-sm font-medium">
                         {waitingForDriverOrders.length} order{waitingForDriverOrders.length !== 1 ? 's' : ''}

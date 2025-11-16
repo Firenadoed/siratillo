@@ -25,9 +25,9 @@ import {
   Users,
   CheckCircle,
   XCircle,
-  Clock,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  MoreVertical
 } from "lucide-react";
 
 // Dynamically import Leaflet map for client-side only
@@ -40,7 +40,7 @@ const BranchMap = dynamic(() => import("../../components/branchmap"), {
   )
 });
 
-// Types
+// Types (unchanged)
 type Branch = { 
   id: string; 
   name: string; 
@@ -133,6 +133,7 @@ export default function ManageShops() {
   // Collapsible states
   const [expandedShops, setExpandedShops] = useState<Set<string>>(new Set());
   const [showAccountRequests, setShowAccountRequests] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState<string | null>(null);
 
   // ==============================
   // Authentication & Authorization Check
@@ -525,6 +526,11 @@ export default function ManageShops() {
     setExpandedShops(newExpanded);
   };
 
+  // Toggle mobile menu
+  const toggleMobileMenu = (itemId: string) => {
+    setMobileMenuOpen(mobileMenuOpen === itemId ? null : itemId);
+  };
+
   // ==============================
   // Filtered and paginated lists
   // ==============================
@@ -561,7 +567,7 @@ export default function ManageShops() {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto"></div>
           <p className="mt-4 text-gray-600">Checking permissions...</p>
         </div>
       </div>
@@ -599,7 +605,7 @@ export default function ManageShops() {
                 className="bg-green-600 hover:bg-green-700 text-sm sm:text-base py-3 h-12 min-h-12 flex items-center gap-2 px-4"
               >
                 <Users className="h-5 w-5" />
-                <span>Account Requests</span>
+                <span className="hidden sm:inline">Account Requests</span>
                 {pendingRequestsCount > 0 && (
                   <span className="bg-red-500 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center">
                     {pendingRequestsCount}
@@ -611,7 +617,7 @@ export default function ManageShops() {
                 className="bg-red-500 hover:bg-red-600 text-sm sm:text-base py-3 h-12 min-h-12 flex items-center gap-2 px-4"
               >
                 <LogOut className="h-5 w-5" />
-                <span>Logout</span>
+                <span className="hidden sm:inline">Logout</span>
               </Button>
             </div>
           </div>
@@ -693,11 +699,11 @@ export default function ManageShops() {
                                 )}
                               </div>
                               <div className="flex items-center gap-2">
-                                <div className="flex flex-wrap gap-2 justify-start">
+                                {/* Desktop Actions */}
+                                <div className="hidden sm:flex flex-wrap gap-2">
                                   <Button 
                                     size="lg"
-                                    variant="outline"
-                                    className="h-12 w-12 p-0 text-gray-600 hover:text-purple-600 hover:border-purple-300"
+                                    className="h-12 px-4 bg-amber-500 hover:bg-amber-600 text-white flex items-center gap-2"
                                     onClick={(e) => { 
                                       e.stopPropagation();
                                       setEditingShop(shop); 
@@ -706,17 +712,29 @@ export default function ManageShops() {
                                       setOpenAddShop(true); 
                                     }}
                                   >
-                                    <Edit2 className="h-5 w-5" />
+                                    <Edit2 className="h-4 w-4" />
+                                    <span>Edit</span>
+                                  </Button>
+                                  <Button 
+                                    size="lg"
+                                    className="h-12 px-4 bg-green-600 hover:bg-green-700 text-white flex items-center gap-2"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setOpenAddBranch({ open: true, shopId: shop.id });
+                                    }}
+                                  >
+                                    <MapPin className="h-4 w-4" />
+                                    <span>Add Branch</span>
                                   </Button>
                                   <AlertDialog>
                                     <AlertDialogTrigger asChild>
                                       <Button 
                                         size="lg"
-                                        variant="outline"
-                                        className="h-12 w-12 p-0 text-gray-600 hover:text-red-600 hover:border-red-300"
+                                        className="h-12 px-4 bg-red-500 hover:bg-red-600 text-white flex items-center gap-2"
                                         onClick={(e) => e.stopPropagation()}
                                       >
-                                        <Trash2 className="h-5 w-5" />
+                                        <Trash2 className="h-4 w-4" />
+                                        <span>Delete</span>
                                       </Button>
                                     </AlertDialogTrigger>
                                     <AlertDialogContent className="max-w-[90vw] sm:max-w-md rounded-xl mx-2">
@@ -745,17 +763,65 @@ export default function ManageShops() {
                                       </AlertDialogFooter>
                                     </AlertDialogContent>
                                   </AlertDialog>
-                                  <Button 
-                                    size="lg"
-                                    className="h-12 w-12 p-0 bg-green-600 hover:bg-green-700 text-white"
+                                </div>
+
+                                {/* Mobile Menu */}
+                                <div className="sm:hidden relative">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-10 w-10 p-0"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      setOpenAddBranch({ open: true, shopId: shop.id });
+                                      toggleMobileMenu(shop.id);
                                     }}
                                   >
-                                    <MapPin className="h-5 w-5" />
+                                    <MoreVertical className="h-5 w-5" />
                                   </Button>
+                                  
+                                  {mobileMenuOpen === shop.id && (
+                                    <div className="absolute right-0 top-12 z-10 w-48 bg-white border border-gray-200 rounded-lg shadow-lg py-2">
+                                      <button
+                                        className="w-full px-4 py-3 text-left text-sm flex items-center gap-3 hover:bg-gray-50 text-amber-600"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setEditingShop(shop);
+                                          setNewShopName(shop.name);
+                                          setNewShopAddress(shop.description || "");
+                                          setOpenAddShop(true);
+                                          setMobileMenuOpen(null);
+                                        }}
+                                      >
+                                        <Edit2 className="h-4 w-4" />
+                                        Edit Shop
+                                      </button>
+                                      <button
+                                        className="w-full px-4 py-3 text-left text-sm flex items-center gap-3 hover:bg-gray-50 text-green-600"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setOpenAddBranch({ open: true, shopId: shop.id });
+                                          setMobileMenuOpen(null);
+                                        }}
+                                      >
+                                        <MapPin className="h-4 w-4" />
+                                        Add Branch
+                                      </button>
+                                      <button
+                                        className="w-full px-4 py-3 text-left text-sm flex items-center gap-3 hover:bg-gray-50 text-red-600"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setDeleteShopId(shop.id);
+                                          handleDeleteShop();
+                                          setMobileMenuOpen(null);
+                                        }}
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                        Delete Shop
+                                      </button>
+                                    </div>
+                                  )}
                                 </div>
+
                                 <Button
                                   variant="ghost"
                                   size="sm"
@@ -794,8 +860,7 @@ export default function ManageShops() {
                                         <div className="flex flex-wrap gap-2 justify-start">
                                           <Button 
                                             size="sm"
-                                            variant="ghost"
-                                            className="h-10 w-10 p-0 text-gray-500 hover:text-purple-600"
+                                            className="h-10 px-3 bg-amber-500 hover:bg-amber-600 text-white flex items-center gap-2"
                                             onClick={() => { 
                                               setEditingBranch(b); 
                                               setBranchName(b.name); 
@@ -804,17 +869,18 @@ export default function ManageShops() {
                                               setOpenAddBranch({ open: true, shopId: shop.id }); 
                                             }}
                                           >
-                                            <Edit2 className="h-4 w-4" />
+                                            <Edit2 className="h-3 w-3" />
+                                            <span>Edit</span>
                                           </Button>
                                           <AlertDialog>
                                             <AlertDialogTrigger asChild>
                                               <Button 
                                                 size="sm"
-                                                variant="ghost"
-                                                className="h-10 w-10 p-0 text-gray-500 hover:text-red-600"
+                                                className="h-10 px-3 bg-red-500 hover:bg-red-600 text-white flex items-center gap-2"
                                                 onClick={(e) => e.stopPropagation()}
                                               >
-                                                <Trash2 className="h-4 w-4" />
+                                                <Trash2 className="h-3 w-3" />
+                                                <span>Delete</span>
                                               </Button>
                                             </AlertDialogTrigger>
                                             <AlertDialogContent className="max-w-[90vw] sm:max-w-md rounded-xl mx-2">
@@ -866,6 +932,7 @@ export default function ManageShops() {
                           disabled={shopPage === 1}
                           className="flex items-center gap-2"
                         >
+                          <ChevronLeft className="h-4 w-4" />
                           Previous
                         </Button>
                         
@@ -880,6 +947,7 @@ export default function ManageShops() {
                           className="flex items-center gap-2"
                         >
                           Next
+                          <ChevronRight className="h-4 w-4" />
                         </Button>
                       </div>
                     )}
@@ -947,8 +1015,7 @@ export default function ManageShops() {
                             <div className="flex flex-wrap gap-2 justify-start mt-3 sm:mt-0">
                               <Button 
                                 size="lg"
-                                variant="outline"
-                                className="h-12 w-12 p-0 text-gray-600 hover:text-purple-600 hover:border-purple-300"
+                                className="h-12 px-4 bg-amber-500 hover:bg-amber-600 text-white flex items-center gap-2"
                                 onClick={(e) => { 
                                   e.stopPropagation();
                                   setEditingOwner(owner); 
@@ -958,17 +1025,18 @@ export default function ManageShops() {
                                   setOpenAddOwner(true); 
                                 }}
                               >
-                                <Edit2 className="h-5 w-5" />
+                                <Edit2 className="h-4 w-4" />
+                                <span>Edit</span>
                               </Button>
                               <AlertDialog>
                                 <AlertDialogTrigger asChild>
                                   <Button 
                                     size="lg"
-                                    variant="outline"
-                                    className="h-12 w-12 p-0 text-gray-600 hover:text-red-600 hover:border-red-300"
+                                    className="h-12 px-4 bg-red-500 hover:bg-red-600 text-white flex items-center gap-2"
                                     onClick={(e) => e.stopPropagation()}
                                   >
-                                    <Trash2 className="h-5 w-5" />
+                                    <Trash2 className="h-4 w-4" />
+                                    <span>Delete</span>
                                   </Button>
                                 </AlertDialogTrigger>
                                 <AlertDialogContent className="max-w-[90vw] sm:max-w-md rounded-xl mx-2">
@@ -1012,6 +1080,7 @@ export default function ManageShops() {
                           disabled={ownerPage === 1}
                           className="flex items-center gap-2"
                         >
+                          <ChevronLeft className="h-4 w-4" />
                           Previous
                         </Button>
                         
@@ -1026,6 +1095,7 @@ export default function ManageShops() {
                           className="flex items-center gap-2"
                         >
                           Next
+                          <ChevronRight className="h-4 w-4" />
                         </Button>
                       </div>
                     )}
@@ -1112,30 +1182,33 @@ export default function ManageShops() {
                           <div className="flex gap-2 pt-2">
                             <Button
                               size="sm"
-                              className="flex-1 h-10 bg-green-600 hover:bg-green-700 text-white"
+                              className="flex-1 h-10 bg-green-600 hover:bg-green-700 text-white flex items-center gap-2"
                               onClick={() => handleProcessRequest(request.id, 'approve')}
                               disabled={isProcessingRequest === request.id}
                             >
                               {isProcessingRequest === request.id ? (
                                 <Loader2 className="h-4 w-4 animate-spin" />
                               ) : (
-                                <CheckCircle className="h-4 w-4 mr-1" />
+                                <>
+                                  <CheckCircle className="h-4 w-4" />
+                                  <span>Approve</span>
+                                </>
                               )}
-                              Approve
                             </Button>
                             <Button
                               size="sm"
-                              variant="outline"
-                              className="flex-1 h-10 text-red-600 border-red-300 hover:bg-red-50"
+                              className="flex-1 h-10 bg-red-500 hover:bg-red-600 text-white flex items-center gap-2"
                               onClick={() => handleProcessRequest(request.id, 'reject')}
                               disabled={isProcessingRequest === request.id}
                             >
                               {isProcessingRequest === request.id ? (
                                 <Loader2 className="h-4 w-4 animate-spin" />
                               ) : (
-                                <XCircle className="h-4 w-4 mr-1" />
+                                <>
+                                  <XCircle className="h-4 w-4" />
+                                  <span>Reject</span>
+                                </>
                               )}
-                              Reject
                             </Button>
                           </div>
                         )}
@@ -1152,6 +1225,7 @@ export default function ManageShops() {
                         disabled={requestsPage === 1}
                         className="flex items-center gap-2 text-sm"
                       >
+                        <ChevronLeft className="h-4 w-4" />
                         Previous
                       </Button>
                       
@@ -1166,6 +1240,7 @@ export default function ManageShops() {
                         className="flex items-center gap-2 text-sm"
                       >
                         Next
+                        <ChevronRight className="h-4 w-4" />
                       </Button>
                     </div>
                   )}

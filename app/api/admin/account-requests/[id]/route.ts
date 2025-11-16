@@ -1,30 +1,59 @@
+// app/api/admin/account-requests/[id]/route.ts
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
-import { NextRequest, NextResponse } from 'next/server'
+import { verifyAdminAccess } from '@/lib/auth-utils'
+import { NextResponse } from 'next/server'
 import { sendEmailNodemailer } from '@/lib/nodemailer'
+import { randomBytes } from 'crypto'
 
-// PUT /api/admin/account-requests/[id] - Update account request status
+// PUT /api/admin/account-requests/[id] - Update account request status (Admin only)
 export async function PUT(
-  request: NextRequest, // ✅ FIXED: Changed from Request to NextRequest
-  { params }: { params: { id: string } }
+  request: Request,
+  { params }: { params: { id: string } }  // ✅ Remove Promise
 ) {
   try {
-    const { action } = await request.json()
+    // 🔒 Verify admin authentication and authorization
+    const authResult = await verifyAdminAccess()
+    if (!authResult.authorized) {
+      return NextResponse.json({ error: authResult.error }, { status: authResult.status })
+    }
+
+    const { id } = params;
+
+    // 🔒 Safe JSON parsing
+    let requestBody;
+    try {
+      requestBody = await request.json();
+    } catch (parseError) {
+      console.error('JSON parse error:', parseError);
+      return NextResponse.json({ error: "Invalid JSON in request body" }, { status: 400 })
+    }
+
+    const { action } = requestBody;
     
+    // 🔒 Input validation
     if (!action) {
       return NextResponse.json({ 
         error: "Action is required" 
       }, { status: 400 })
     }
 
-    const requestId = params.id
+    if (!['approve', 'reject'].includes(action)) {
+      return NextResponse.json({ 
+        error: "Invalid action. Must be 'approve' or 'reject'" 
+      }, { status: 400 })
+    }
 
-    console.log(`👤 Processing account request:`, { action, requestId })
+    // 🔒 UUID validation
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(id)) {
+      return NextResponse.json({ error: "Invalid request ID" }, { status: 400 })
+    }
 
     // 1. Get the account request
     const { data: accountRequest, error: fetchError } = await supabaseAdmin
       .from('account_requests')
       .select('*')
-      .eq('id', requestId)
+      .eq('id', id)
       .single()
 
     if (fetchError || !accountRequest) {
@@ -37,22 +66,62 @@ export async function PUT(
       }, { status: 400 })
     }
 
-    // 2. Process based on action
+    // 🔒 Check for duplicate email before approval
     if (action === 'approve') {
-      await createShopFromRequest(accountRequest)
+      const { data: existingUser, error: emailCheckError } = await supabaseAdmin
+        .from('users')
+        .select('id')
+        .eq('email', accountRequest.email)
+        .maybeSingle()
+
+      if (emailCheckError) {
+        console.error('Email check error:', emailCheckError);
+        return NextResponse.json({ error: "Failed to validate email" }, { status: 500 })
+      }
+
+      if (existingUser) {
+        return NextResponse.json({ error: "Email already registered" }, { status: 400 })
+      }
+    }
+
+    // 2. Process based on action
+    let result;
+    if (action === 'approve') {
+      result = await createShopFromRequest(accountRequest, authResult.userId)
     } else {
-      await sendRejectionEmail(accountRequest.email, accountRequest.name)
+      result = await sendRejectionEmail(accountRequest.email, accountRequest.name)
     }
 
     // 3. DELETE the account request from table (for both approve and reject)
     const { error: deleteError } = await supabaseAdmin
       .from('account_requests')
       .delete()
-      .eq('id', requestId)
+      .eq('id', id)
 
-    if (deleteError) throw deleteError
+    if (deleteError) {
+      console.error('Delete error:', deleteError);
+      return NextResponse.json({ error: "Failed to clean up request" }, { status: 500 })
+    }
 
-    console.log(`✅ Account request ${action}ed and deleted from database`)
+    // 🔒 Audit log the action
+    try {
+      await supabaseAdmin
+        .from('admin_audit_logs')
+        .insert({
+          admin_id: authResult.userId,
+          action: `account_request_${action}`,
+          target_request_id: id,
+          target_email: accountRequest.email,
+          target_shop_name: accountRequest.shop_name,
+          description: `${action === 'approve' ? 'Approved' : 'Rejected'} account request for ${accountRequest.shop_name} (${accountRequest.email})`,
+          ip_address: request.headers.get('x-forwarded-for')?.split(',')[0] || request.headers.get('x-real-ip') || 'unknown',
+          user_agent: request.headers.get('user-agent') || 'unknown',
+          created_at: new Date().toISOString()
+        })
+    } catch (auditError) {
+      console.error('Audit log error:', auditError);
+      // Don't fail the request if audit logging fails
+    }
 
     return NextResponse.json({ 
       success: true,
@@ -60,8 +129,45 @@ export async function PUT(
     })
 
   } catch (error: any) {
-    console.error("💥 Account request processing error:", error)
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    console.error('Error in account request update:', error);
+    return NextResponse.json({ error: "Failed to process account request" }, { status: 500 })
+  }
+}
+
+// GET /api/admin/account-requests/[id] - Get specific account request (Admin only)
+export async function GET(
+  request: Request,
+  { params }: { params: { id: string } }  // ✅ Correct type
+){
+  try {
+    // 🔒 Verify admin authentication and authorization
+    const authResult = await verifyAdminAccess()
+    if (!authResult.authorized) {
+      return NextResponse.json({ error: authResult.error }, { status: authResult.status })
+    }
+
+    const { id } = params; 
+
+    // 🔒 UUID validation
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(id)) {
+      return NextResponse.json({ error: "Invalid request ID" }, { status: 400 })
+    }
+
+    const { data: accountRequest, error } = await supabaseAdmin
+      .from('account_requests')
+      .select('*')
+      .eq('id', id)
+      .single()
+
+    if (error || !accountRequest) {
+      return NextResponse.json({ error: "Account request not found" }, { status: 404 })
+    }
+
+    return NextResponse.json({ request: accountRequest })
+  } catch (error: any) {
+    console.error('Error fetching account request:', error);
+    return NextResponse.json({ error: "Failed to fetch account request" }, { status: 500 })
   }
 }
 
@@ -114,10 +220,8 @@ async function sendApprovalEmail(email: string, name: string, password: string, 
         </div>
       `
     });
-    
-    console.log("✅ Approval email sent to:", email);
   } catch (error) {
-    console.error("❌ Failed to send approval email:", error);
+    console.error("Failed to send approval email:", error);
   }
 }
 
@@ -153,19 +257,15 @@ async function sendRejectionEmail(email: string, name: string) {
         </div>
       `
     });
-    
-    console.log("✅ Rejection email sent to:", email);
   } catch (error) {
-    console.error("❌ Failed to send rejection email:", error);
+    console.error("Failed to send rejection email:", error);
   }
 }
 
 // Helper function to create shop from approved request
-async function createShopFromRequest(accountRequest: any) {
-  // Generate a random password for the owner
-  const randomPassword = Math.random().toString(36).slice(-8) + 'Aa1!'
-
-  console.log("🏪 Creating shop from request:", accountRequest.id)
+async function createShopFromRequest(accountRequest: any, adminId: string) {
+  // 🔒 Better password generation
+  const randomPassword = generateSecurePassword()
 
   // 1. Create auth user (owner)
   const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
@@ -178,8 +278,10 @@ async function createShopFromRequest(accountRequest: any) {
     }
   })
 
-  if (authError) throw authError
-  console.log("✅ Auth user created:", authData.user.id)
+  if (authError) {
+    console.error('Auth user creation error:', authError);
+    throw new Error("Failed to create user account")
+  }
 
   // 2. Create user profile
   const { error: profileError } = await supabaseAdmin
@@ -191,8 +293,12 @@ async function createShopFromRequest(accountRequest: any) {
       phone: accountRequest.contact
     }])
 
-  if (profileError) throw profileError
-  console.log("✅ User profile created")
+  if (profileError) {
+    console.error('Profile creation error:', profileError);
+    // Cleanup auth user
+    await supabaseAdmin.auth.admin.deleteUser(authData.user.id)
+    throw new Error("Failed to create user profile")
+  }
 
   // 3. Get owner role
   const { data: role, error: roleError } = await supabaseAdmin
@@ -201,42 +307,31 @@ async function createShopFromRequest(accountRequest: any) {
     .eq('name', 'owner')
     .single()
 
-  if (roleError) {
-    console.error("Role fetch error:", roleError)
-    // If role doesn't exist, create it
-    const { data: newRole, error: createRoleError } = await supabaseAdmin
-      .from('roles')
-      .insert([{ name: 'owner' }])
-      .select()
-      .single()
-    
-    if (createRoleError) throw createRoleError
-    console.log("✅ Owner role created:", newRole.id)
-    
-    // Assign the new role
-    const { error: userRoleError } = await supabaseAdmin
-      .from('user_roles')
-      .insert([{ 
-        user_id: authData.user.id, 
-        role_id: newRole.id 
-      }])
-    
-    if (userRoleError) throw userRoleError
-    console.log("✅ User role assigned")
-  } else {
-    // Assign existing role
-    const { error: userRoleError } = await supabaseAdmin
-      .from('user_roles')
-      .insert([{ 
-        user_id: authData.user.id, 
-        role_id: role.id 
-      }])
-
-    if (userRoleError) throw userRoleError
-    console.log("✅ User role assigned")
+  if (roleError || !role) {
+    console.error('Role fetch error:', roleError);
+    // Cleanup
+    await supabaseAdmin.auth.admin.deleteUser(authData.user.id)
+    await supabaseAdmin.from('users').delete().eq('id', authData.user.id)
+    throw new Error("Failed to assign owner role")
   }
 
-  // 4. Create shop
+  // 4. Assign role to user
+  const { error: userRoleError } = await supabaseAdmin
+    .from('user_roles')
+    .insert([{ 
+      user_id: authData.user.id, 
+      role_id: role.id 
+    }])
+
+  if (userRoleError) {
+    console.error('User role assignment error:', userRoleError);
+    // Cleanup
+    await supabaseAdmin.auth.admin.deleteUser(authData.user.id)
+    await supabaseAdmin.from('users').delete().eq('id', authData.user.id)
+    throw new Error("Failed to assign user role")
+  }
+
+  // 5. Create shop
   const { data: shop, error: shopError } = await supabaseAdmin
     .from('shops')
     .insert([{
@@ -247,10 +342,16 @@ async function createShopFromRequest(accountRequest: any) {
     .select()
     .single()
 
-  if (shopError) throw shopError
-  console.log("✅ Shop created:", shop.id)
+  if (shopError) {
+    console.error('Shop creation error:', shopError);
+    // Cleanup
+    await supabaseAdmin.auth.admin.deleteUser(authData.user.id)
+    await supabaseAdmin.from('users').delete().eq('id', authData.user.id)
+    await supabaseAdmin.from('user_roles').delete().eq('user_id', authData.user.id)
+    throw new Error("Failed to create shop")
+  }
 
-  // 5. Create shop branch
+  // 6. Create shop branch
   const { data: branch, error: branchError } = await supabaseAdmin
     .from('shop_branches')
     .insert([{
@@ -263,10 +364,17 @@ async function createShopFromRequest(accountRequest: any) {
     .select()
     .single()
 
-  if (branchError) throw branchError
-  console.log("✅ Shop branch created")
+  if (branchError) {
+    console.error('Branch creation error:', branchError);
+    // Cleanup
+    await supabaseAdmin.auth.admin.deleteUser(authData.user.id)
+    await supabaseAdmin.from('users').delete().eq('id', authData.user.id)
+    await supabaseAdmin.from('user_roles').delete().eq('user_id', authData.user.id)
+    await supabaseAdmin.from('shops').delete().eq('id', shop.id)
+    throw new Error("Failed to create shop branch")
+  }
 
-  // 6. Create shop user assignment (CRITICAL - this is what your frontend expects)
+  // 7. Create shop user assignment
   const { error: assignmentError } = await supabaseAdmin
     .from('shop_user_assignments')
     .insert([{
@@ -277,14 +385,21 @@ async function createShopFromRequest(accountRequest: any) {
       is_active: true
     }])
 
-  if (assignmentError) throw assignmentError
-  console.log("✅ Shop user assignment created")
+  if (assignmentError) {
+    console.error('Assignment creation error:', assignmentError);
+    // Cleanup
+    await supabaseAdmin.auth.admin.deleteUser(authData.user.id)
+    await supabaseAdmin.from('users').delete().eq('id', authData.user.id)
+    await supabaseAdmin.from('user_roles').delete().eq('user_id', authData.user.id)
+    await supabaseAdmin.from('shops').delete().eq('id', shop.id)
+    await supabaseAdmin.from('shop_branches').delete().eq('id', branch.id)
+    throw new Error("Failed to create shop assignment")
+  }
 
-  // 7. Create default services for the branch
+  // 8. Create default services for the branch
   await createDefaultServices(branch.id)
-  console.log("✅ Default services created")
 
-  // 8. Send approval email with credentials
+  // 9. Send approval email with credentials
   await sendApprovalEmail(
     accountRequest.email,
     accountRequest.name,
@@ -292,10 +407,35 @@ async function createShopFromRequest(accountRequest: any) {
     accountRequest.shop_name
   )
 
-  console.log("🎉 Shop owner account created and email sent")
+  return {
+    shopId: shop.id,
+    branchId: branch.id,
+    ownerId: authData.user.id
+  }
 }
 
-// Helper function to create default services for a new branch
+// 🔒 Secure password generation
+function generateSecurePassword(): string {
+  const length = 12;
+  const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*";
+  let password = "";
+  
+  // Ensure at least one of each required character type
+  password += randomBytes(1).toString('hex')[0]; // lowercase
+  password += randomBytes(1).toString('hex')[0].toUpperCase(); // uppercase  
+  password += Math.floor(Math.random() * 10); // number
+  password += "!@#$%^&*"[Math.floor(Math.random() * 8)]; // special
+  
+  // Fill the rest randomly
+  for (let i = password.length; i < length; i++) {
+    password += charset[Math.floor(Math.random() * charset.length)];
+  }
+  
+  // Shuffle the password
+  return password.split('').sort(() => 0.5 - Math.random()).join('');
+}
+
+// Helper function to create default services
 async function createDefaultServices(branchId: string) {
   try {
     const defaultServices = [
@@ -331,35 +471,12 @@ async function createDefaultServices(branchId: string) {
       .from('shop_services')
       .insert(servicesWithBranchId)
 
-    if (servicesError) throw servicesError
+    if (servicesError) {
+      // Log but don't throw - services creation shouldn't block the main flow
+      console.error("Error creating default services:", servicesError)
+    }
 
   } catch (error) {
     console.error("Error creating default services:", error)
-    // Don't throw here - services creation shouldn't block the main flow
-  }
-}
-
-// Optional: Add GET method to fetch specific account request
-export async function GET(
-  request: NextRequest, // ✅ Also use NextRequest here
-  { params }: { params: { id: string } }
-) {
-  try {
-    const requestId = params.id
-
-    const { data: accountRequest, error } = await supabaseAdmin
-      .from('account_requests')
-      .select('*')
-      .eq('id', requestId)
-      .single()
-
-    if (error || !accountRequest) {
-      return NextResponse.json({ error: "Account request not found" }, { status: 404 })
-    }
-
-    return NextResponse.json({ request: accountRequest })
-  } catch (error: any) {
-    console.error("Error fetching account request:", error)
-    return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }

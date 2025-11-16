@@ -1,75 +1,106 @@
 // app/api/admin/check-auth/route.ts
-import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { supabaseServer } from '@/lib/supabaseServer'
 import { NextResponse } from 'next/server'
 
-// Define proper TypeScript interfaces
+// Define proper types for the response
 interface Role {
   name: string;
 }
 
-interface UserRole {
-  user_id: string;
-  role_id: string;
-  roles: Role; // ← Object, not array!
+interface UserRoleWithArray {
+  roles: Role[]; // Array structure
 }
+
+interface UserRoleWithObject {
+  roles: Role; // Object structure
+}
+
+type UserRole = UserRoleWithArray | UserRoleWithObject;
 
 export async function GET() {
   try {
-    // Use the same server client for session check as in login
-    const supabaseAuth = await supabaseServer()
+    console.log("🔐 Check-auth: Starting authentication check...")
     
-    const { data: { session }, error: sessionError } = await supabaseAuth.auth.getSession()
+    const supabase = await supabaseServer()
     
-    if (sessionError) {
-      console.error("Session error:", sessionError)
-      return NextResponse.json({ authorized: false, error: "Session error" })
-    }
-    
+    const { data: { session } } = await supabase.auth.getSession()
     if (!session) {
-      return NextResponse.json({ authorized: false, error: "Not authenticated" })
+      console.log("🔐 No valid session found")
+      return NextResponse.json({ authorized: false, error: "No session" })
     }
 
-    console.log("🔐 Check-auth: User authenticated - ID:", session.user.id)
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
+      console.log("🔐 User verification failed")
+      return NextResponse.json({ authorized: false, error: "User verification failed" })
+    }
 
-    // Use supabaseAdmin for role query (bypasses RLS)
-    const { data: roleData, error: roleError } = await supabaseAdmin
+    console.log("🔐 Checking roles for user:", user.id)
+    
+    // Use regular client - RLS policies will work now!
+    const { data: roleData, error: roleError } = await supabase
       .from("user_roles")
       .select(`
-        user_id,
-        role_id,
         roles (
           name
         )
       `)
-      .eq("user_id", session.user.id) as { data: UserRole[] | null, error: any }
+      .eq("user_id", user.id)
 
-    console.log("📊 Check-auth role query result:", {
-      data: roleData,
-      error: roleError?.message,
-      count: roleData?.length
+    console.log("🔐 Role query result:", { 
+      roleData, 
+      roleError: roleError?.message,
+      count: roleData?.length 
     })
 
     if (roleError) {
-      console.error("Role query error:", roleError)
-      return NextResponse.json({ authorized: false, error: "Failed to check permissions" })
+      console.error("🔐 Role query error:", roleError)
+      return NextResponse.json({ authorized: false, error: "Role query failed" })
     }
 
     if (!roleData || roleData.length === 0) {
-      return NextResponse.json({ authorized: false, error: "No role data found" })
+      console.log("🔐 No roles found for user")
+      return NextResponse.json({ authorized: false, error: "No roles found" })
     }
 
-    // CORRECTED: roles is an object, not array
-    const isSuperadmin = roleData[0].roles?.name === 'superadmin'
-    console.log("🎭 Check-auth isSuperadmin:", isSuperadmin)
+    // 🔥 FIXED: Handle the data structure correctly with type safety
+    console.log("🔐 DEBUG - Full roleData:", JSON.stringify(roleData, null, 2))
+    
+    // Extract role names - handle the actual structure safely
+    const roleNames = (roleData as UserRole[]).map(userRole => {
+      const roles = userRole.roles;
+      
+      // Type-safe handling of both structures
+      if (Array.isArray(roles)) {
+        return roles[0]?.name; // If it's an array
+      } else if (roles && typeof roles === 'object' && 'name' in roles) {
+        return (roles as Role).name; // If it's an object with name property
+      }
+      return null;
+    }).filter(Boolean) as string[];
+    
+    console.log("🔐 User roles:", roleNames)
+
+    const isSuperadmin = roleNames.includes('superadmin')
+    console.log("🔐 Is superadmin:", isSuperadmin)
 
     if (!isSuperadmin) {
-      return NextResponse.json({ authorized: false, error: "Superadmin access required" })
+      console.log("🔐 User is not superadmin")
+      return NextResponse.json({ authorized: false, error: "Not superadmin" })
     }
 
-    return NextResponse.json({ authorized: true })
+    console.log("🔐 ✅ User authorized as superadmin")
+    return NextResponse.json({ 
+      authorized: true,
+      user: {
+        id: user.id,
+        email: user.email,
+        roles: roleNames
+      }
+    })
+
   } catch (error: any) {
-    console.error("Auth check error:", error)
+    console.error("🔐 Auth check unexpected error:", error)
     return NextResponse.json({ authorized: false, error: error.message })
   }
 }

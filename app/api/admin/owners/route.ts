@@ -1,10 +1,17 @@
 // app/api/admin/owners/route.ts
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
+import { verifyAdminAccess } from '@/lib/auth-utils' // Import from your existing utils
 import { NextResponse } from 'next/server'
 
-// GET /api/admin/owners - Get all owners
+// GET /api/admin/owners - Get all owners (Admin only)
 export async function GET() {
   try {
+    // 🔒 Use your existing auth utility
+    const authResult = await verifyAdminAccess()
+    if (!authResult.authorized) {
+      return NextResponse.json({ error: authResult.error }, { status: authResult.status })
+    }
+
     const { data: owners, error } = await supabaseAdmin
       .from('shop_user_assignments')
       .select(`
@@ -17,25 +24,82 @@ export async function GET() {
       .eq('role_in_shop', 'owner')
       .order('created_at', { ascending: false })
 
-    if (error) throw error
+    if (error) {
+      return NextResponse.json({ error: "Failed to fetch owners" }, { status: 500 })
+    }
+
     return NextResponse.json({ owners: owners || [] })
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ error: "Failed to fetch owners" }, { status: 500 })
   }
 }
 
-// POST /api/admin/owners - Create new owner
+// POST /api/admin/owners - Create new owner (Admin only)
 export async function POST(request: Request) {
   try {
+    // 🔒 Use your existing auth utility
+    const authResult = await verifyAdminAccess()
+    if (!authResult.authorized) {
+      return NextResponse.json({ error: authResult.error }, { status: authResult.status })
+    }
+
     const { full_name, email, password, shop_id } = await request.json()
     
+    // 🔒 Input validation
     if (!full_name?.trim() || !email?.trim() || !password || !shop_id) {
       return NextResponse.json({ 
         error: "Full name, email, password, and shop are required" 
       }, { status: 400 })
     }
 
-    console.log("👤 Creating owner:", { full_name, email, shop_id })
+    // Email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email.trim())) {
+      return NextResponse.json({ error: "Invalid email format" }, { status: 400 })
+    }
+
+    // Password strength
+    if (password.length < 8) {
+      return NextResponse.json({ error: "Password must be at least 8 characters" }, { status: 400 })
+    }
+
+    // UUID validation for shop_id
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(shop_id)) {
+      return NextResponse.json({ error: "Invalid shop ID" }, { status: 400 })
+    }
+
+    // 🔒 Check if shop exists and doesn't already have an owner
+    const { data: shop, error: shopError } = await supabaseAdmin
+      .from('shops')
+      .select('id, name, owner_id')
+      .eq('id', shop_id)
+      .single()
+
+    if (shopError || !shop) {
+      return NextResponse.json({ error: "Shop not found" }, { status: 404 })
+    }
+
+    if (shop.owner_id) {
+      return NextResponse.json({ 
+        error: "Shop already has an owner assigned" 
+      }, { status: 400 })
+    }
+
+    // 🔒 Check for duplicate email
+    const { data: existingUser, error: emailCheckError } = await supabaseAdmin
+      .from('users')
+      .select('id')
+      .eq('email', email.trim())
+      .maybeSingle()
+
+    if (emailCheckError) {
+      return NextResponse.json({ error: "Failed to validate email" }, { status: 500 })
+    }
+
+    if (existingUser) {
+      return NextResponse.json({ error: "Email already registered" }, { status: 400 })
+    }
 
     // 1. Create user with auth (admin API)
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
@@ -46,12 +110,12 @@ export async function POST(request: Request) {
     })
 
     if (authError) {
-      console.error("Auth creation error:", authError)
-      throw authError
+      return NextResponse.json({ error: "Failed to create user account" }, { status: 500 })
     }
-    if (!authData.user) throw new Error('Failed to create user')
 
-    console.log("✅ Auth user created:", authData.user.id)
+    if (!authData.user) {
+      return NextResponse.json({ error: "Failed to create user" }, { status: 500 })
+    }
 
     // 2. Create user profile
     const { error: profileError } = await supabaseAdmin
@@ -63,11 +127,10 @@ export async function POST(request: Request) {
       }])
 
     if (profileError) {
-      console.error("Profile creation error:", profileError)
-      throw profileError
+      // Cleanup auth user
+      await supabaseAdmin.auth.admin.deleteUser(authData.user.id)
+      return NextResponse.json({ error: "Failed to create user profile" }, { status: 500 })
     }
-
-    console.log("✅ User profile created")
 
     // 3. Get owner role
     const { data: role, error: roleError } = await supabaseAdmin
@@ -76,12 +139,12 @@ export async function POST(request: Request) {
       .eq('name', 'owner')
       .single()
 
-    if (roleError) {
-      console.error("Role fetch error:", roleError)
-      throw roleError
+    if (roleError || !role) {
+      // Cleanup
+      await supabaseAdmin.auth.admin.deleteUser(authData.user.id)
+      await supabaseAdmin.from('users').delete().eq('id', authData.user.id)
+      return NextResponse.json({ error: "Failed to assign owner role" }, { status: 500 })
     }
-
-    console.log("✅ Owner role found:", role.id)
 
     // 4. Assign role to user
     const { error: userRoleError } = await supabaseAdmin
@@ -92,11 +155,11 @@ export async function POST(request: Request) {
       }])
 
     if (userRoleError) {
-      console.error("User role assignment error:", userRoleError)
-      throw userRoleError
+      // Cleanup
+      await supabaseAdmin.auth.admin.deleteUser(authData.user.id)
+      await supabaseAdmin.from('users').delete().eq('id', authData.user.id)
+      return NextResponse.json({ error: "Failed to assign user role" }, { status: 500 })
     }
-
-    console.log("✅ User role assigned")
 
     // 5. Assign to shop in shop_user_assignments
     const { error: assignError } = await supabaseAdmin
@@ -108,13 +171,14 @@ export async function POST(request: Request) {
       }])
 
     if (assignError) {
-      console.error("Shop assignment error:", assignError)
-      throw assignError
+      // Cleanup
+      await supabaseAdmin.auth.admin.deleteUser(authData.user.id)
+      await supabaseAdmin.from('users').delete().eq('id', authData.user.id)
+      await supabaseAdmin.from('user_roles').delete().eq('user_id', authData.user.id)
+      return NextResponse.json({ error: "Failed to assign shop" }, { status: 500 })
     }
 
-    console.log("✅ Shop user assignment created")
-
-    // 6. ✅ CRITICAL: Update the shops table with owner_id
+    // 6. Update the shops table with owner_id
     const { error: shopUpdateError } = await supabaseAdmin
       .from('shops')
       .update({ 
@@ -124,11 +188,30 @@ export async function POST(request: Request) {
       .eq('id', shop_id)
 
     if (shopUpdateError) {
-      console.error("Shop update error:", shopUpdateError)
-      throw shopUpdateError
+      // Cleanup
+      await supabaseAdmin.auth.admin.deleteUser(authData.user.id)
+      await supabaseAdmin.from('users').delete().eq('id', authData.user.id)
+      await supabaseAdmin.from('user_roles').delete().eq('user_id', authData.user.id)
+      await supabaseAdmin.from('shop_user_assignments').delete().eq('user_id', authData.user.id)
+      return NextResponse.json({ error: "Failed to update shop ownership" }, { status: 500 })
     }
 
-    console.log("✅ Shop owner_id updated")
+    // 🔒 Audit log the owner creation
+    try {
+      await supabaseAdmin
+        .from('admin_audit_logs')
+        .insert({
+          admin_id: authResult.userId,
+          action: 'owner_creation',
+          target_user_id: authData.user.id,
+          target_shop_id: shop_id,
+          target_shop_name: shop.name,
+          description: `Created owner ${full_name.trim()} for shop: ${shop.name}`,
+          created_at: new Date().toISOString()
+        })
+    } catch (auditError) {
+      // Don't fail the request if audit logging fails
+    }
 
     return NextResponse.json({ 
       success: true,
@@ -136,12 +219,12 @@ export async function POST(request: Request) {
         id: authData.user.id,
         full_name: full_name.trim(),
         email: email.trim(),
-        shop_id
+        shop_id,
+        shop_name: shop.name
       }
     })
 
   } catch (error: any) {
-    console.error("💥 Owner creation error:", error)
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ error: "Failed to create owner" }, { status: 500 })
   }
 }

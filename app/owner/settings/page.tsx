@@ -26,7 +26,7 @@ L.Icon.Default.mergeOptions({
 })
 
 // Default center coordinates (Philippines)
-const DEFAULT_CENTER: [number, number] = [12.8797, 121.7740]
+const DEFAULT_CENTER: [number, number] = [9.3100, 123.3080]
 
 interface Shop {
   id: string
