@@ -1,19 +1,14 @@
 // app/api/account-requests/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { sendEmailNodemailer } from '@/lib/nodemailer';
-import { createClient } from '@supabase/supabase-js';
+import { createClient } from '@/lib/supabaseClient'; // Use regular client
 
-// 🔒 Use a client with limited permissions instead of service role
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,      // ✅ CORRECT
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!  // ✅ CORRECT
-);
-
+const supabase = createClient();
 export async function POST(request: NextRequest) {
   try {
     // 🔒 Request size validation
     const contentLength = request.headers.get('content-length');
-    if (contentLength && parseInt(contentLength) > 10000) { // 10KB limit
+    if (contentLength && parseInt(contentLength) > 10000) {
       return NextResponse.json(
         { error: 'Request too large' },
         { status: 413 }
@@ -177,7 +172,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 🔒 Save to database - REMOVED .select().single() to fix RLS permission issue
+    // 🔒 Save to database using regular client
     const { error: dbError } = await supabase
       .from('account_requests')
       .insert([
@@ -187,7 +182,7 @@ export async function POST(request: NextRequest) {
           contact: contact.trim(),
           shop_name: shopName.trim(),
           shop_address: shopAddress.trim(),
-          latitude: lat, // Use the validated coordinates
+          latitude: lat,
           longitude: lng,
           location_address: locationAddress?.trim() || null,
           status: 'pending'
@@ -205,7 +200,7 @@ export async function POST(request: NextRequest) {
         );
       }
       
-      if (dbError.code === '23505') { // Unique violation
+      if (dbError.code === '23505') {
         return NextResponse.json(
           { error: 'Duplicate entry found' },
           { status: 409 }
