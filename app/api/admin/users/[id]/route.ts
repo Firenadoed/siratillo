@@ -5,7 +5,7 @@ import { verifyAdminAccess } from '@/lib/auth-utils'
 
 export async function DELETE(
   request: Request,
-  { params }: { params: { id: string } }  // ✅ Remove Promise wrapper
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     // 🔒 STEP 1: Use your existing auth utility
@@ -14,7 +14,7 @@ export async function DELETE(
       return NextResponse.json({ error: authResult.error }, { status: authResult.status })
     }
 
-    const { id } = params;
+    const { id } = await params;
 
     // 🔒 STEP 2: Input validation
     if (!id || typeof id !== 'string' || id.length === 0) {

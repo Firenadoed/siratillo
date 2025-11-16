@@ -5,8 +5,8 @@ import { NextResponse } from 'next/server'
 
 // PUT /api/admin/branches/[id] - Update branch (Admin only)
 export async function PUT(
-    request: Request,
-  { params }: { params: { id: string } }  // ✅ Remove Promise
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     // 🔒 Verify admin authentication and authorization
@@ -15,7 +15,7 @@ export async function PUT(
       return NextResponse.json({ error: authResult.error }, { status: authResult.status })
     }
 
-    const { id } = params;
+    const { id } = await params;
     
     // 🔒 Input validation
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -162,15 +162,16 @@ export async function PUT(
 // DELETE /api/admin/branches/[id] - Delete branch (Admin only)
 export async function DELETE(
   request: Request,
-  { params }: { params: { id: string } }  // ✅ Remove Promise
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    // 🔒 Verify admin authentication and authorization
     const authResult = await verifyAdminAccess()
     if (!authResult.authorized) {
       return NextResponse.json({ error: authResult.error }, { status: authResult.status })
     }
 
-    const { id } = params;  // ✅ Remove await
+    const { id } = await params;
     
     // 🔒 Input validation
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -304,15 +305,16 @@ export async function DELETE(
 // GET /api/admin/branches/[id] - Get specific branch details (Admin only)
 export async function GET(
   request: Request,
-  { params }: { params: { id: string } }  // ✅ Remove Promise
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    // 🔒 Verify admin authentication and authorization
     const authResult = await verifyAdminAccess()
     if (!authResult.authorized) {
       return NextResponse.json({ error: authResult.error }, { status: authResult.status })
     }
 
-    const { id } = params;  // ✅ Remove await
+    const { id } = await params;
     
     // 🔒 Input validation
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;

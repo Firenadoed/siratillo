@@ -5,7 +5,7 @@ import { NextResponse } from 'next/server'
 
 export async function PUT(
   request: Request,
-  { params }: { params: { id: string } }  // ✅ Remove Promise wrapper
+  { params }: { params: Promise<{ id: string }> }
 ) {
   console.log('Starting owner update request...');
   
@@ -19,7 +19,7 @@ export async function PUT(
     }
     console.log('Admin access verified for user:', authResult.userId);
 
-    const { id } = params;
+    const { id } = await params;
     console.log('Processing owner ID:', id);
     
     // 🔒 Input validation

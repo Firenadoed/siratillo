@@ -8,7 +8,7 @@ import { randomBytes } from 'crypto'
 // PUT /api/admin/account-requests/[id] - Update account request status (Admin only)
 export async function PUT(
   request: Request,
-  { params }: { params: { id: string } }  // ✅ Remove Promise
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     // 🔒 Verify admin authentication and authorization
@@ -17,7 +17,7 @@ export async function PUT(
       return NextResponse.json({ error: authResult.error }, { status: authResult.status })
     }
 
-    const { id } = params;
+    const { id } = await params;
 
     // 🔒 Safe JSON parsing
     let requestBody;
@@ -137,8 +137,8 @@ export async function PUT(
 // GET /api/admin/account-requests/[id] - Get specific account request (Admin only)
 export async function GET(
   request: Request,
-  { params }: { params: { id: string } }  // ✅ Correct type
-){
+  { params }: { params: Promise<{ id: string }> }
+) {
   try {
     // 🔒 Verify admin authentication and authorization
     const authResult = await verifyAdminAccess()
@@ -146,7 +146,7 @@ export async function GET(
       return NextResponse.json({ error: authResult.error }, { status: authResult.status })
     }
 
-    const { id } = params; 
+    const { id } = await params;
 
     // 🔒 UUID validation
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
