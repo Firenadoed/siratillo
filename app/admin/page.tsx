@@ -699,11 +699,12 @@ export default function ManageShops() {
                                 )}
                               </div>
                               <div className="flex items-center gap-2">
-                                {/* Desktop Actions */}
-                                <div className="hidden sm:flex flex-wrap gap-2">
+                                {/* Desktop Actions - ICONS ONLY */}
+                                <div className="hidden sm:flex flex-wrap gap-1">
+                                  {/* Edit Shop Icon */}
                                   <Button 
-                                    size="lg"
-                                    className="h-12 px-4 bg-amber-500 hover:bg-amber-600 text-white flex items-center gap-2"
+                                    size="icon"
+                                    className="h-10 w-10 bg-amber-500 hover:bg-amber-600 text-white flex items-center justify-center"
                                     onClick={(e) => { 
                                       e.stopPropagation();
                                       setEditingShop(shop); 
@@ -711,30 +712,34 @@ export default function ManageShops() {
                                       setNewShopAddress(shop.description || ""); 
                                       setOpenAddShop(true); 
                                     }}
+                                    title="Edit Shop"
                                   >
                                     <Edit2 className="h-4 w-4" />
-                                    <span>Edit</span>
                                   </Button>
+                                  
+                                  {/* Add Branch Icon */}
                                   <Button 
-                                    size="lg"
-                                    className="h-12 px-4 bg-green-600 hover:bg-green-700 text-white flex items-center gap-2"
+                                    size="icon"
+                                    className="h-10 w-10 bg-green-600 hover:bg-green-700 text-white flex items-center justify-center"
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       setOpenAddBranch({ open: true, shopId: shop.id });
                                     }}
+                                    title="Add Branch"
                                   >
                                     <MapPin className="h-4 w-4" />
-                                    <span>Add Branch</span>
                                   </Button>
+                                  
+                                  {/* Delete Shop Icon */}
                                   <AlertDialog>
                                     <AlertDialogTrigger asChild>
                                       <Button 
-                                        size="lg"
-                                        className="h-12 px-4 bg-red-500 hover:bg-red-600 text-white flex items-center gap-2"
+                                        size="icon"
+                                        className="h-10 w-10 bg-red-500 hover:bg-red-600 text-white flex items-center justify-center"
                                         onClick={(e) => e.stopPropagation()}
+                                        title="Delete Shop"
                                       >
                                         <Trash2 className="h-4 w-4" />
-                                        <span>Delete</span>
                                       </Button>
                                     </AlertDialogTrigger>
                                     <AlertDialogContent className="max-w-[90vw] sm:max-w-md rounded-xl mx-2">
@@ -857,10 +862,11 @@ export default function ManageShops() {
                                           <p className="font-medium text-base break-words text-gray-900 mb-1">{b.name}</p>
                                           <p className="text-sm text-gray-600 break-words leading-relaxed">{b.address}</p>
                                         </div>
-                                        <div className="flex flex-wrap gap-2 justify-start">
+                                        <div className="flex flex-wrap gap-1 justify-start">
+                                          {/* Edit Branch Icon */}
                                           <Button 
-                                            size="sm"
-                                            className="h-10 px-3 bg-amber-500 hover:bg-amber-600 text-white flex items-center gap-2"
+                                            size="icon"
+                                            className="h-9 w-9 bg-amber-500 hover:bg-amber-600 text-white flex items-center justify-center"
                                             onClick={() => { 
                                               setEditingBranch(b); 
                                               setBranchName(b.name); 
@@ -868,19 +874,21 @@ export default function ManageShops() {
                                               setBranchLocation([b.lat || 9.308, b.lng || 123.308]); 
                                               setOpenAddBranch({ open: true, shopId: shop.id }); 
                                             }}
+                                            title="Edit Branch"
                                           >
                                             <Edit2 className="h-3 w-3" />
-                                            <span>Edit</span>
                                           </Button>
+                                          
+                                          {/* Delete Branch Icon */}
                                           <AlertDialog>
                                             <AlertDialogTrigger asChild>
                                               <Button 
-                                                size="sm"
-                                                className="h-10 px-3 bg-red-500 hover:bg-red-600 text-white flex items-center gap-2"
+                                                size="icon"
+                                                className="h-9 w-9 bg-red-500 hover:bg-red-600 text-white flex items-center justify-center"
                                                 onClick={(e) => e.stopPropagation()}
+                                                title="Delete Branch"
                                               >
                                                 <Trash2 className="h-3 w-3" />
-                                                <span>Delete</span>
                                               </Button>
                                             </AlertDialogTrigger>
                                             <AlertDialogContent className="max-w-[90vw] sm:max-w-md rounded-xl mx-2">
@@ -1012,10 +1020,11 @@ export default function ManageShops() {
                                 Shop: <span className="font-medium break-words">{shop?.name || "Not assigned"}</span>
                               </p>
                             </div>
-                            <div className="flex flex-wrap gap-2 justify-start mt-3 sm:mt-0">
+                            <div className="flex flex-wrap gap-1 justify-start mt-3 sm:mt-0">
+                              {/* Edit Owner Icon */}
                               <Button 
-                                size="lg"
-                                className="h-12 px-4 bg-amber-500 hover:bg-amber-600 text-white flex items-center gap-2"
+                                size="icon"
+                                className="h-12 w-12 bg-amber-500 hover:bg-amber-600 text-white flex items-center justify-center"
                                 onClick={(e) => { 
                                   e.stopPropagation();
                                   setEditingOwner(owner); 
@@ -1024,19 +1033,21 @@ export default function ManageShops() {
                                   setNewOwnerShop(owner.shop_id); 
                                   setOpenAddOwner(true); 
                                 }}
+                                title="Edit Owner"
                               >
                                 <Edit2 className="h-4 w-4" />
-                                <span>Edit</span>
                               </Button>
+                              
+                              {/* Delete Owner Icon */}
                               <AlertDialog>
                                 <AlertDialogTrigger asChild>
                                   <Button 
-                                    size="lg"
-                                    className="h-12 px-4 bg-red-500 hover:bg-red-600 text-white flex items-center gap-2"
+                                    size="icon"
+                                    className="h-12 w-12 bg-red-500 hover:bg-red-600 text-white flex items-center justify-center"
                                     onClick={(e) => e.stopPropagation()}
+                                    title="Delete Owner"
                                   >
                                     <Trash2 className="h-4 w-4" />
-                                    <span>Delete</span>
                                   </Button>
                                 </AlertDialogTrigger>
                                 <AlertDialogContent className="max-w-[90vw] sm:max-w-md rounded-xl mx-2">
