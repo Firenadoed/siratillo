@@ -41,6 +41,49 @@ interface Analytics {
   period: string;
 }
 
+// Helper function to generate empty chart data based on time period
+const generateEmptyChartData = (period: string) => {
+  switch (period) {
+    case 'daily':
+      // 24 hours
+      return Array.from({ length: 24 }, (_, i) => ({
+        name: `${i.toString().padStart(2, '0')}:00`,
+        sales: 0
+      }));
+    case 'weekly':
+      // Last 7 days
+      return Array.from({ length: 7 }, (_, i) => {
+        const d = new Date();
+        d.setDate(d.getDate() - 6 + i);
+        return {
+          name: d.toLocaleDateString("en-US", { weekday: "short" }),
+          sales: 0
+        };
+      });
+    case 'monthly':
+      // 4 weeks
+      return Array.from({ length: 4 }, (_, i) => ({
+        name: `W${i + 1}`,
+        sales: 0
+      }));
+    case 'yearly':
+      // 12 months
+      return Array.from({ length: 12 }, (_, i) => {
+        const d = new Date();
+        d.setMonth(d.getMonth() - (11 - i));
+        return {
+          name: d.toLocaleDateString("en-US", { month: "short" }),
+          sales: 0
+        };
+      });
+    default:
+      return Array.from({ length: 7 }, (_, i) => ({
+        name: `Day ${i + 1}`,
+        sales: 0
+      }));
+  }
+};
+
 function DashboardContent() {
   const router = useRouter();
   const { selectedBranch, branchChangeTrigger } = useBranch();
@@ -145,7 +188,7 @@ function DashboardContent() {
   }, [isAuthorized, selectedBranch, branchChangeTrigger, timePeriod]);
 
   // ==============================
-  // 📈 USE ANALYTICS FROM API INSTEAD OF CALCULATING
+  // 📈 GENERATE EMPTY CHART DATA WHEN NO ANALYTICS
   // ==============================
   const {
     totalSales,
@@ -156,13 +199,26 @@ function DashboardContent() {
     customerGrowthData,
   } = useMemo(() => {
     if (!analytics) {
+      // Generate empty chart data structures
+      const emptyChartData = generateEmptyChartData(timePeriod);
+      const emptyMethodDistribution = [
+        { name: "Drop Off", value: 0 },
+        { name: "Pick Up", value: 0 },
+        { name: "Delivery", value: 0 },
+      ];
+      const emptyCustomerGrowthData = emptyChartData.map(item => ({
+        name: item.name,
+        new: 0,
+        returning: 0
+      }));
+
       return {
         totalSales: 0,
         totalOrders: 0,
         uniqueCustomers: 0,
-        chartData: [],
-        methodDistribution: [],
-        customerGrowthData: [],
+        chartData: emptyChartData,
+        methodDistribution: emptyMethodDistribution,
+        customerGrowthData: emptyCustomerGrowthData,
       };
     }
 
@@ -174,7 +230,7 @@ function DashboardContent() {
       methodDistribution: analytics.methodDistribution || [],
       customerGrowthData: analytics.customerGrowthData || [],
     };
-  }, [analytics]);
+  }, [analytics, timePeriod]);
 
   // ==============================
   // 🎯 RENDER LOGIC
@@ -204,22 +260,7 @@ function DashboardContent() {
     );
   }
 
-  // Show empty state if no data
-  if (orders.length === 0) {
-    return (
-      <>
-        <h1 className="text-xl sm:text-2xl font-bold mb-6 text-gray-800">
-          {shopName ? `${shopName} — ` : ""}Analytics
-        </h1>
-        <div className="text-center py-12">
-          <p className="text-gray-500 text-lg">No orders found for {selectedBranch.name}</p>
-          <p className="text-gray-400 mt-2">Start accepting orders to see analytics</p>
-        </div>
-      </>
-    );
-  }
-
-  // Show dashboard with data
+  // Show dashboard with data (charts will show even with empty data)
   return (
     <>
       <Toaster position="top-right" richColors />
@@ -233,6 +274,11 @@ function DashboardContent() {
           Viewing data for: <span className="font-bold">{selectedBranch.name}</span>
           <span className="ml-2 text-blue-600">• {timePeriod.charAt(0).toUpperCase() + timePeriod.slice(1)} View</span>
         </p>
+        {orders.length === 0 && (
+          <p className="text-blue-600 text-sm mt-2">
+            No orders found. Charts are showing empty data.
+          </p>
+        )}
       </div>
 
       {/* Summary Cards */}
@@ -305,15 +351,15 @@ function DashboardContent() {
         <TabsContent value={timePeriod}>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
             <ChartCard title={`Sales Overview - ${timePeriod.charAt(0).toUpperCase() + timePeriod.slice(1)}`}>
-              <LineChartComp data={chartData} />
+              <LineChartComp data={chartData} isEmpty={totalSales === 0} />
             </ChartCard>
 
             <ChartCard title={`Services Distribution - ${timePeriod.charAt(0).toUpperCase() + timePeriod.slice(1)}`}>
-              <PieChartComp data={methodDistribution} />
+              <PieChartComp data={methodDistribution} isEmpty={totalOrders === 0} />
             </ChartCard>
 
             <ChartCard title={`Customer Growth - ${timePeriod.charAt(0).toUpperCase() + timePeriod.slice(1)}`}>
-              <BarChartComp data={customerGrowthData} />
+              <BarChartComp data={customerGrowthData} isEmpty={uniqueCustomers === 0} />
             </ChartCard>
           </div>
         </TabsContent>
@@ -332,7 +378,7 @@ function ChartCard({ title, children }: { title: string; children: React.ReactNo
   );
 }
 
-function LineChartComp({ data }: { data: { name: string; sales: number }[] }) {
+function LineChartComp({ data, isEmpty }: { data: { name: string; sales: number }[]; isEmpty?: boolean }) {
   return (
     <ResponsiveContainer width="100%" height="100%">
       <LineChart data={data}>
@@ -349,13 +395,19 @@ function LineChartComp({ data }: { data: { name: string; sales: number }[] }) {
           strokeWidth={2} 
           dot={{ fill: '#8884d8', strokeWidth: 2, r: 4 }}
           activeDot={{ r: 6, stroke: '#8884d8', strokeWidth: 2 }}
+          strokeDasharray={isEmpty ? "5 5" : "0"} // Dashed line when empty
         />
+        {isEmpty && (
+          <text x="50%" y="50%" textAnchor="middle" dominantBaseline="middle" fill="#666">
+            No sales data
+          </text>
+        )}
       </LineChart>
     </ResponsiveContainer>
   );
 }
 
-function PieChartComp({ data }: { data: { name: string; value: number }[] }) {
+function PieChartComp({ data, isEmpty }: { data: { name: string; value: number }[]; isEmpty?: boolean }) {
   const renderCustomizedLabel = ({
     cx,
     cy,
@@ -364,6 +416,9 @@ function PieChartComp({ data }: { data: { name: string; value: number }[] }) {
     outerRadius,
     percent,
   }: any) => {
+    // Don't show labels when all values are zero
+    if (isEmpty) return null;
+    
     const RADIAN = Math.PI / 180;
     const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
     const x = cx + radius * Math.cos(-midAngle * RADIAN);
@@ -394,17 +449,25 @@ function PieChartComp({ data }: { data: { name: string; value: number }[] }) {
           labelLine={false}
         >
           {data.map((entry, i) => (
-            <Cell key={i} fill={COLORS[i % COLORS.length]} />
+            <Cell 
+              key={i} 
+              fill={isEmpty ? "#e5e7eb" : COLORS[i % COLORS.length]} // Gray when empty
+              opacity={isEmpty ? 0.5 : 1}
+            />
           ))}
         </Pie>
         <Tooltip formatter={(value) => [value, 'Orders']} />
+        {isEmpty && (
+          <text x="50%" y="50%" textAnchor="middle" dominantBaseline="middle" fill="#666">
+            No orders
+          </text>
+        )}
       </PieChart>
     </ResponsiveContainer>
   );
 }
 
-
-function BarChartComp({ data }: { data: { name: string; new: number; returning: number }[] }) {
+function BarChartComp({ data, isEmpty }: { data: { name: string; new: number; returning: number }[]; isEmpty?: boolean }) {
   return (
     <ResponsiveContainer width="100%" height="100%">
       <BarChart data={data}>
@@ -412,8 +475,23 @@ function BarChartComp({ data }: { data: { name: string; new: number; returning: 
         <XAxis dataKey="name" />
         <YAxis />
         <Tooltip />
-        <Bar dataKey="new" name="New Customers" fill="#82ca9d" />
-        <Bar dataKey="returning" name="Returning Customers" fill="#8884d8" />
+        <Bar 
+          dataKey="new" 
+          name="New Customers" 
+          fill={isEmpty ? "#9ca3af" : "#82ca9d"} 
+          opacity={isEmpty ? 0.5 : 1}
+        />
+        <Bar 
+          dataKey="returning" 
+          name="Returning Customers" 
+          fill={isEmpty ? "#6b7280" : "#8884d8"} 
+          opacity={isEmpty ? 0.5 : 1}
+        />
+        {isEmpty && (
+          <text x="50%" y="50%" textAnchor="middle" dominantBaseline="middle" fill="#666">
+            No customer data
+          </text>
+        )}
       </BarChart>
     </ResponsiveContainer>
   );

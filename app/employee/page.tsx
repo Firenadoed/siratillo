@@ -104,7 +104,7 @@ function ManualOrderCreation({
   methods 
 }: { 
   branchId: string;
-  onOrderCreated: () => void;
+  onOrderCreated: (tempOrder?: Order, revert?: boolean) => void;
   services: Service[];
   detergents: Detergent[];
   softeners: Softener[];
@@ -172,6 +172,28 @@ function ManualOrderCreation({
     setCreating(true);
 
     try {
+      // 🔥 OPTIMISTIC UPDATE: Create temporary order immediately
+      const tempOrder: Order = {
+        id: `temp-${Date.now()}`,
+        order_item_id: null,
+        customer_name: customerName.trim(),
+        detergent: detergents.find(d => d.id === selectedDetergent)?.name || null,
+        softener: softeners.find(s => s.id === selectedSoftener)?.name || null,
+        method: selectedMethod,
+        method_label: methods.find(m => m.code === selectedMethod)?.label || selectedMethod,
+        kilo: null,
+        amount: null,
+        status: 'pending',
+        customer_contact: customerPhone.trim() || undefined,
+        delivery_location: deliveryAddress.trim() || undefined,
+        shop_id: branchId,
+        db_status: selectedMethod === 'pickup' ? 'waiting_for_pickup' : undefined,
+        created_at: new Date().toISOString()
+      };
+
+      // Add to orders list immediately
+      onOrderCreated(tempOrder);
+
       const response = await fetch('/api/employee/orders', {
         method: 'PUT',
         headers: {
@@ -194,12 +216,16 @@ function ManualOrderCreation({
       const result = await response.json();
 
       if (!response.ok || !result.success) {
+        // 🔥 REVERT optimistic update if failed
+        onOrderCreated(tempOrder, true); // Remove temp order
         throw new Error(result.error || 'Failed to create order');
       }
 
       toast.success("Manual order created successfully!");
       setShowModal(false);
       resetForm();
+      
+      // Refresh to get the real order data
       onOrderCreated();
       
     } catch (error: any) {
@@ -894,6 +920,23 @@ function CollapsibleSection({
   );
 }
 
+// Helper function for optimistic status updates
+const getNextDbStatus = (currentStatus: string | undefined, method: string) => {
+  if (method === 'dropoff') {
+    if (currentStatus === 'in_progress') return 'completed';
+  }
+  if (method === 'pickup') {
+    if (currentStatus === 'in_progress') return 'ready_for_delivery';
+    if (currentStatus === 'ready_for_delivery') return 'completed';
+  }
+  if (method === 'delivery') {
+    if (currentStatus === 'in_progress') return 'ready_for_delivery';
+    if (currentStatus === 'ready_for_delivery') return 'out_for_delivery';
+    if (currentStatus === 'out_for_delivery') return 'completed';
+  }
+  return currentStatus;
+};
+
 // Enhanced Main Component
 function EmployeeContent() {
   const router = useRouter();
@@ -1155,6 +1198,22 @@ function EmployeeContent() {
     }
   };
 
+  // Handle manual order creation callback with optimistic updates
+  const handleManualOrderCreated = useCallback((tempOrder?: Order, revert?: boolean) => {
+    if (tempOrder) {
+      if (revert) {
+        // Remove temp order (revert)
+        setOrders(prev => prev.filter(order => order.id !== tempOrder.id));
+      } else {
+        // Add temp order (optimistic update)
+        setOrders(prev => [tempOrder, ...prev]);
+      }
+    } else {
+      // Refresh orders normally
+      fetchOrders();
+    }
+  }, [fetchOrders]);
+
   // FIXED: Enhanced weight confirmation for three order types
   const handleConfirm = (order: Order) => {
     if (isProcessing(order.id)) {
@@ -1191,7 +1250,7 @@ function EmployeeContent() {
     setShowModal(true);
   };
 
-  // Enhanced weight saving
+  // 🔥 ENHANCED: Weight saving with optimistic updates
   const handleSaveWeight = async () => {
     if (!currentOrder) return;
     
@@ -1211,6 +1270,7 @@ function EmployeeContent() {
     }
 
     setSavingWeight(true);
+    addToProcessing(currentOrder.id);
 
     try {
       const pricePerKg = currentOrder.services?.price ?? 0;
@@ -1220,6 +1280,9 @@ function EmployeeContent() {
         toast.error("Service information missing");
         return;
       }
+
+      // 🔥 OPTIMISTIC UPDATE: Remove from pending immediately
+      setOrders(prev => prev.filter(order => order.id !== currentOrder.id));
 
       const response = await fetch('/api/employee/orders', {
         method: 'POST',
@@ -1238,29 +1301,30 @@ function EmployeeContent() {
       const result = await response.json();
 
       if (!response.ok || !result.success) {
+        // 🔥 REVERT optimistic update if failed
+        setOrders(prev => [...prev, currentOrder]);
         throw new Error(result.error || 'Failed to process order');
       }
 
       toast.success("Order moved to work queue!");
       
-      // Optimistic update
-      setOrders(prev => prev.filter(order => order.id !== currentOrder.id));
+      // Refresh to get the actual order_item_id and updated data
+      await fetchOrders();
       
       setShowModal(false);
       setWeight("");
       setCurrentOrder(null);
-      removeFromProcessing(currentOrder.id);
       
     } catch (error) {
       console.error("Error saving weight:", error);
       toast.error("An error occurred: " + (error as Error).message);
-      removeFromProcessing(currentOrder.id);
     } finally {
       setSavingWeight(false);
+      removeFromProcessing(currentOrder.id);
     }
   };
 
-  // Enhanced status change for three order types
+  // 🔥 ENHANCED: Status change with optimistic updates
   const handleStatusChange = async (order: Order) => {
     if (!order.order_item_id) {
       toast.error("This order cannot be updated yet");
@@ -1276,6 +1340,18 @@ function EmployeeContent() {
     addToProcessing(orderItemId);
 
     try {
+      // 🔥 OPTIMISTIC UPDATE: Update status immediately
+      setOrders(prev => prev.map(o => 
+        o.order_item_id === orderItemId 
+          ? { 
+              ...o, 
+              // Optimistically update to next status
+              db_status: getNextDbStatus(o.db_status, o.method),
+              last_status_update: new Date().toISOString()
+            }
+          : o
+      ));
+
       const response = await fetch('/api/employee/orders', {
         method: 'PATCH',
         headers: {
@@ -1290,10 +1366,18 @@ function EmployeeContent() {
       const result = await response.json();
 
       if (!response.ok || !result.success) {
+        // 🔥 REVERT optimistic update if failed
+        setOrders(prev => prev.map(o => 
+          o.order_item_id === orderItemId 
+            ? { ...o, db_status: order.db_status, last_status_update: order.last_status_update }
+            : o
+        ));
         throw new Error(result.error || 'Failed to update status');
       }
 
       toast.success("Order status updated!");
+      
+      // Refresh to get accurate data from server
       await fetchOrders();
       
     } catch (error) {
@@ -1312,11 +1396,6 @@ function EmployeeContent() {
     setShowModal(false);
     setWeight("");
     setCurrentOrder(null);
-  };
-
-  // Handle manual order creation callback
-  const handleManualOrderCreated = () => {
-    fetchOrders(); // Refresh orders list
   };
 
   // Loading state

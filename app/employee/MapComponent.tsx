@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, memo } from 'react'; // ✅ Added memo
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
@@ -18,7 +18,8 @@ interface MapComponentProps {
   selectedLng: number | null;
 }
 
-export default function MapComponent({ onLocationSelect, selectedLat, selectedLng }: MapComponentProps) {
+// ✅ Changed from export default function to just function
+function MapComponent({ onLocationSelect, selectedLat, selectedLng }: MapComponentProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const markerRef = useRef<L.Marker | null>(null);
@@ -213,3 +214,12 @@ export default function MapComponent({ onLocationSelect, selectedLat, selectedLn
     </div>
   );
 }
+
+// ✅ ADD THIS: Export with memo to prevent unnecessary re-renders
+export default memo(MapComponent, (prevProps, nextProps) => {
+  // Only re-render if location props actually change
+  return (
+    prevProps.selectedLat === nextProps.selectedLat &&
+    prevProps.selectedLng === nextProps.selectedLng
+  );
+});
