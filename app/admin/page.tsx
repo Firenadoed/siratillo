@@ -40,7 +40,7 @@ const BranchMap = dynamic(() => import("../../components/branchmap"), {
   )
 });
 
-// Types (unchanged)
+// Types
 type Branch = { 
   id: string; 
   name: string; 
@@ -123,6 +123,10 @@ export default function ManageShops() {
   const [isLoadingOwners, setIsLoadingOwners] = useState(false);
   const [isLoadingRequests, setIsLoadingRequests] = useState(false);
   const [isProcessingRequest, setIsProcessingRequest] = useState<string | null>(null);
+
+  // NEW: Logout states
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
   // Pagination states
   const [shopPage, setShopPage] = useState(1);
@@ -228,6 +232,33 @@ export default function ManageShops() {
   };
 
   // ==============================
+  // NEW: Enhanced Logout Handler
+  // ==============================
+  const handleLogout = async () => {
+    if (isLoggingOut) return; // Prevent multiple clicks
+    
+    setIsLoggingOut(true);
+    try {
+      const response = await fetch('/api/auth/logout', { method: 'POST' });
+      if (response.ok) {
+        toast.success("Logged out successfully");
+        router.replace('/login');
+      } else {
+        throw new Error('Logout failed');
+      }
+    } catch (error: any) {
+      toast.error("Logout failed: " + error.message);
+    } finally {
+      setIsLoggingOut(false);
+      setShowLogoutConfirm(false);
+    }
+  };
+
+  const handleLogoutClick = () => {
+    setShowLogoutConfirm(true);
+  };
+
+  // ==============================
   // Account Request Handlers
   // ==============================
   const handleProcessRequest = async (requestId: string, action: 'approve' | 'reject') => {
@@ -255,21 +286,8 @@ export default function ManageShops() {
   };
 
   // ==============================
-  // Other Handlers (unchanged)
+  // Other Handlers
   // ==============================
-  const handleLogout = async () => {
-    try {
-      const response = await fetch('/api/auth/logout', { method: 'POST' });
-      if (response.ok) {
-        router.replace('/login');
-      } else {
-        throw new Error('Logout failed');
-      }
-    } catch (error: any) {
-      toast.error("Logout failed: " + error.message);
-    }
-  };
-
   const handleSaveShop = async (e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault();
@@ -612,13 +630,61 @@ export default function ManageShops() {
                   </span>
                 )}
               </Button>
-              <Button 
-                onClick={handleLogout} 
-                className="bg-red-500 hover:bg-red-600 text-sm sm:text-base py-3 h-12 min-h-12 flex items-center gap-2 px-4"
-              >
-                <LogOut className="h-5 w-5" />
-                <span className="hidden sm:inline">Logout</span>
-              </Button>
+              
+              {/* NEW: Logout Button with Confirmation */}
+              <AlertDialog open={showLogoutConfirm} onOpenChange={setShowLogoutConfirm}>
+                <AlertDialogTrigger asChild>
+                  <Button 
+                    onClick={handleLogoutClick}
+                    disabled={isLoggingOut}
+                    className="bg-red-500 hover:bg-red-600 text-sm sm:text-base py-3 h-12 min-h-12 flex items-center gap-2 px-4"
+                  >
+                    {isLoggingOut ? (
+                      <Loader2 className="h-5 w-5 animate-spin" />
+                    ) : (
+                      <LogOut className="h-5 w-5" />
+                    )}
+                    <span className="hidden sm:inline">
+                      {isLoggingOut ? "Logging out..." : "Logout"}
+                    </span>
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent className="max-w-[90vw] sm:max-w-md rounded-xl mx-2">
+                  <AlertDialogHeader>
+                    <AlertDialogTitle className="text-lg sm:text-xl text-center sm:text-left flex items-center gap-3">
+                      <LogOut className="h-5 w-5 text-red-500" />
+                      Confirm Logout
+                    </AlertDialogTitle>
+                  </AlertDialogHeader>
+                  <div className="py-4">
+                    <p className="text-gray-600 text-center sm:text-left">
+                      Are you sure you want to logout? You'll need to login again to access the dashboard.
+                    </p>
+                  </div>
+                  <AlertDialogFooter className="flex flex-row gap-3 sm:gap-0">
+                    <AlertDialogCancel 
+                      className="flex-1 text-sm h-12 min-h-12"
+                      disabled={isLoggingOut}
+                    >
+                      Cancel
+                    </AlertDialogCancel>
+                    <AlertDialogAction 
+                      className="flex-1 text-sm h-12 min-h-12 bg-red-600 hover:bg-red-700"
+                      onClick={handleLogout}
+                      disabled={isLoggingOut}
+                    >
+                      {isLoggingOut ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                          Logging out...
+                        </>
+                      ) : (
+                        "Logout"
+                      )}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </div>
           </div>
         </header>
@@ -1277,7 +1343,7 @@ export default function ManageShops() {
         </Button>
       )}
 
-      {/* =================== Dialogs (unchanged) =================== */}
+      {/* =================== Dialogs =================== */}
       {/* Shop Dialog */}
       <Dialog open={openAddShop} onOpenChange={(open) => {
         if (!open) resetShopForm();
