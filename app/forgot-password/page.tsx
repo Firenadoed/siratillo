@@ -64,7 +64,7 @@ export default function ForgotPasswordPage() {
             
             <p className="text-gray-600 mb-6">
               If an account with <strong>{email}</strong> exists, we've sent a password reset link. 
-              Please check your inbox and follow the instructions.
+              Please check your inbox and follow the instructions provided.
             </p>
 
             <div className="space-y-3">
