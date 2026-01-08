@@ -10,44 +10,20 @@ import { Loader2, MapPin, AlertCircle, CheckCircle2 } from "lucide-react";
 import dynamic from 'next/dynamic';
 import { useRouter } from "next/navigation";
 
-// Dynamically import map components with no SSR
-const MapContainer = dynamic(
-  () => import('react-leaflet').then((mod) => mod.MapContainer),
-  { ssr: false }
+
+// Dynamically import your MapComponent
+const MapComponent = dynamic(
+  () => import('./MapComponent'),
+  { 
+    ssr: false,
+    loading: () => (
+      <div className="h-[400px] w-full bg-gray-100 animate-pulse rounded-lg flex items-center justify-center">
+        <Loader2 className="h-8 w-8 text-blue-500 animate-spin" />
+        <span className="ml-2 text-gray-600">Loading map...</span>
+      </div>
+    )
+  }
 );
-
-const TileLayer = dynamic(
-  () => import('react-leaflet').then((mod) => mod.TileLayer),
-  { ssr: false }
-);
-
-const Marker = dynamic(
-  () => import('react-leaflet').then((mod) => mod.Marker),
-  { ssr: false }
-);
-
-// Dynamically import the LocationMarker component
-const LocationMarker = dynamic(
-  () => Promise.resolve(({ onLocationSelect }: { onLocationSelect: (lat: number, lng: number, address: string) => void }) => {
-    const { useMapEvents } = require('react-leaflet');
-    const [position, setPosition] = useState<[number, number] | null>(null);
-
-    useMapEvents({
-      click(e: any) {
-        const { lat, lng } = e.latlng;
-        setPosition([lat, lng]);
-        const address = `Lat: ${lat.toFixed(6)}, Lng: ${lng.toFixed(6)}`;
-        onLocationSelect(lat, lng, address);
-      },
-    });
-
-    return position === null ? null : <Marker position={position} />;
-  }),
-  { ssr: false }
-);
-
-// Default center coordinates
-const DEFAULT_CENTER: [number, number] = [9.3103, 123.3081];
 
 // Success Modal Component
 function SuccessModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
@@ -68,7 +44,6 @@ function SuccessModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => voi
 
       return () => clearTimeout(timer);
     } else if (isOpen && countdown === 0) {
-      // Use router.push instead of calling onClose to avoid state update during render
       router.push('/login');
     }
   }, [isOpen, countdown, router]);
@@ -135,21 +110,9 @@ export default function RequestAccountPage() {
     location: "",
   });
   const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [selectedLat, setSelectedLat] = useState<number | null>(null);
+  const [selectedLng, setSelectedLng] = useState<number | null>(null);
   const router = useRouter();
-
-  // Fix Leaflet icons only in browser
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const L = require('leaflet');
-      delete (L.Icon.Default.prototype as any)._getIconUrl;
-      L.Icon.Default.mergeOptions({
-        iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-        iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-        shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-      });
-    }
-  }, []);
-
   // Format phone number as user types
   const formatPhoneNumber = (value: string): string => {
     // Remove all non-digit characters except +
@@ -312,6 +275,9 @@ export default function RequestAccountPage() {
   };
 
   const handleLocationSelect = (lat: number, lng: number, address: string) => {
+    setSelectedLat(lat);
+    setSelectedLng(lng);
+    
     setFormData(prev => ({
       ...prev,
       latitude: lat.toString(),
@@ -366,6 +332,8 @@ export default function RequestAccountPage() {
           longitude: "",
           locationAddress: "",
         });
+        setSelectedLat(null);
+        setSelectedLng(null);
       } else {
         const data = await response.json();
         setMessage(data.error || "Something went wrong. Please try again.");
@@ -510,18 +478,12 @@ export default function RequestAccountPage() {
                   Click on the map to mark your shop location
                 </p>
                 
-                <div className="border border-gray-300 rounded-lg overflow-hidden">
-                  <MapContainer
-                    center={DEFAULT_CENTER}
-                    zoom={13}
-                    style={{ height: '300px', width: '100%' }}
-                  >
-                    <TileLayer
-                      url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                      attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                    />
-                    <LocationMarker onLocationSelect={handleLocationSelect} />
-                  </MapContainer>
+                <div className="border border-gray-300 rounded-lg overflow-hidden h-[400px]">
+                  <MapComponent
+                    onLocationSelect={handleLocationSelect}
+                    selectedLat={selectedLat}
+                    selectedLng={selectedLng}
+                  />
                 </div>
 
                 {(formData.latitude && formData.longitude) && (

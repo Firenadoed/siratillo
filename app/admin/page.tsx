@@ -27,7 +27,9 @@ import {
   XCircle,
   ChevronLeft,
   ChevronRight,
-  MoreVertical
+  MoreVertical,
+  Menu,
+  X
 } from "lucide-react";
 
 // Dynamically import Leaflet map for client-side only
@@ -138,6 +140,9 @@ export default function ManageShops() {
   const [expandedShops, setExpandedShops] = useState<Set<string>>(new Set());
   const [showAccountRequests, setShowAccountRequests] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState<string | null>(null);
+  
+  // NEW: Hamburger menu state
+  const [showHamburgerMenu, setShowHamburgerMenu] = useState(false);
 
   // ==============================
   // Authentication & Authorization Check
@@ -251,11 +256,13 @@ export default function ManageShops() {
     } finally {
       setIsLoggingOut(false);
       setShowLogoutConfirm(false);
+      setShowHamburgerMenu(false);
     }
   };
 
   const handleLogoutClick = () => {
     setShowLogoutConfirm(true);
+    setShowHamburgerMenu(false);
   };
 
   // ==============================
@@ -617,13 +624,15 @@ export default function ManageShops() {
                 Superadmin Dashboard
               </h1>
             </div>
-            <div className="flex items-center gap-3">
+            
+            {/* Desktop Buttons */}
+            <div className="hidden sm:flex items-center gap-3">
               <Button 
                 onClick={() => setShowAccountRequests(!showAccountRequests)}
                 className="bg-green-600 hover:bg-green-700 text-sm sm:text-base py-3 h-12 min-h-12 flex items-center gap-2 px-4"
               >
                 <Users className="h-5 w-5" />
-                <span className="hidden sm:inline">Account Requests</span>
+                <span>Account Requests</span>
                 {pendingRequestsCount > 0 && (
                   <span className="bg-red-500 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center">
                     {pendingRequestsCount}
@@ -631,7 +640,7 @@ export default function ManageShops() {
                 )}
               </Button>
               
-              {/* NEW: Logout Button with Confirmation */}
+              {/* Logout Button */}
               <AlertDialog open={showLogoutConfirm} onOpenChange={setShowLogoutConfirm}>
                 <AlertDialogTrigger asChild>
                   <Button 
@@ -686,7 +695,63 @@ export default function ManageShops() {
                 </AlertDialogContent>
               </AlertDialog>
             </div>
+
+            {/* Mobile Hamburger Menu Button */}
+            <div className="sm:hidden">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-12 w-12 text-white hover:bg-purple-600"
+                onClick={() => setShowHamburgerMenu(!showHamburgerMenu)}
+              >
+                {showHamburgerMenu ? (
+                  <X className="h-6 w-6" />
+                ) : (
+                  <Menu className="h-6 w-6" />
+                )}
+              </Button>
+            </div>
           </div>
+
+          {/* Mobile Hamburger Menu Dropdown */}
+          {showHamburgerMenu && (
+            <div className="absolute top-16 right-4 sm:hidden w-64 bg-white rounded-lg shadow-xl border border-gray-200 z-50 py-3">
+              {/* Account Requests Button */}
+              <button
+                onClick={() => {
+                  setShowAccountRequests(!showAccountRequests);
+                  setShowHamburgerMenu(false);
+                }}
+                className="w-full px-4 py-4 text-left flex items-center justify-between hover:bg-gray-50 border-b border-gray-100"
+              >
+                <div className="flex items-center gap-3">
+                  <Users className="h-5 w-5 text-green-600" />
+                  <span className="text-gray-800 font-medium">Account Requests</span>
+                </div>
+                {pendingRequestsCount > 0 && (
+                  <span className="bg-red-500 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center">
+                    {pendingRequestsCount}
+                  </span>
+                )}
+              </button>
+
+              {/* Logout Button */}
+              <button
+                onClick={handleLogoutClick}
+                disabled={isLoggingOut}
+                className="w-full px-4 py-4 text-left flex items-center gap-3 hover:bg-gray-50 text-red-600"
+              >
+                {isLoggingOut ? (
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                ) : (
+                  <LogOut className="h-5 w-5" />
+                )}
+                <span className="font-medium">
+                  {isLoggingOut ? "Logging out..." : "Logout"}
+                </span>
+              </button>
+            </div>
+          )}
         </header>
 
         {/* Main Content - Centered Shops and Owners */}
