@@ -26,8 +26,98 @@ import {
   Calendar,
   Home,
   Plus,
-  ShoppingBag
+  ShoppingBag,
+  AlertTriangle,
+  X
 } from "lucide-react";
+
+// Dynamically import Leaflet to avoid SSR issues
+const MapComponent = dynamic(() => import('./MapComponent'), {
+  ssr: false,
+  loading: () => <div className="h-64 bg-gray-200 rounded-lg flex items-center justify-center">Loading map...</div>
+});
+
+// Logout Confirmation Modal Component
+function LogoutConfirmationModal({ 
+  isOpen, 
+  onClose, 
+  onConfirm 
+}: { 
+  isOpen: boolean
+  onClose: () => void
+  onConfirm: () => void
+}) {
+  if (!isOpen) return null
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      {/* Backdrop */}
+      <div 
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300"
+        onClick={onClose}
+      />
+      
+      {/* Modal */}
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+        {/* Header */}
+        <div className="p-6 border-b border-gray-100">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center">
+                <AlertTriangle className="w-5 h-5 text-red-600" />
+              </div>
+              <div>
+                <h3 className="font-bold text-gray-900 text-lg">Confirm Logout</h3>
+                <p className="text-gray-600 text-sm mt-1">
+                  Are you sure you want to log out?
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={onClose}
+              className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+            >
+              <X className="h-5 w-5 text-gray-500" />
+            </button>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="p-6">
+          <p className="text-gray-700">
+            You will be redirected to the login page and will need to sign in again to access the employee dashboard.
+          </p>
+          <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+            <div className="flex items-start gap-3">
+              <Clock className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
+              <div>
+                <p className="text-sm font-medium text-blue-800">Active orders will continue processing</p>
+                <p className="text-xs text-blue-600 mt-1">Logging out won't affect ongoing laundry operations</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="p-6 bg-gray-50 flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-3">
+          <button
+            onClick={onClose}
+            className="px-5 py-2.5 text-gray-700 font-medium rounded-lg hover:bg-gray-100 transition-colors duration-200 order-2 sm:order-1 border border-gray-300"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            className="px-5 py-2.5 bg-gradient-to-r from-red-600 to-red-500 text-white font-medium rounded-lg hover:from-red-700 hover:to-red-600 transition-all duration-200 shadow-md hover:shadow-lg flex items-center justify-center gap-2 order-1 sm:order-2"
+          >
+            <LogOut className="h-4 w-4" />
+            Yes, Logout
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 // Enhanced Types
 type Order = {
@@ -87,12 +177,6 @@ type Method = {
   label: string;
   enabled: boolean;
 };
-
-// Dynamically import Leaflet to avoid SSR issues
-const MapComponent = dynamic(() => import('./MapComponent'), {
-  ssr: false,
-  loading: () => <div className="h-64 bg-gray-200 rounded-lg flex items-center justify-center">Loading map...</div>
-});
 
 // Manual Order Creation Component
 function ManualOrderCreation({ 
@@ -965,6 +1049,9 @@ function EmployeeContent() {
   const [softeners, setSofteners] = useState<Softener[]>([]);
   const [methods, setMethods] = useState<Method[]>([]);
 
+  // Logout modal state
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
+
   // Enhanced processing management
   const addToProcessing = (orderId: string) => {
     setProcessingOrders(prev => new Set([...prev, orderId]));
@@ -1188,14 +1275,24 @@ function EmployeeContent() {
     try {
       const response = await fetch('/api/auth/logout', { method: 'POST' });
       if (response.ok) {
+        toast.success("Logged out successfully");
         router.push("/login");
       } else {
-        toast.error("Logout failed");
+        throw new Error('Logout failed');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Logout error:", error);
-      toast.error("Logout failed");
+      toast.error("Logout failed: " + error.message);
     }
+  };
+
+  const handleLogoutClick = () => {
+    setShowLogoutModal(true);
+  };
+
+  const handleConfirmLogout = () => {
+    setShowLogoutModal(false);
+    handleLogout();
   };
 
   // Handle manual order creation callback with optimistic updates
@@ -1419,7 +1516,7 @@ function EmployeeContent() {
           <ShieldAlert className="h-16 w-16 text-red-500 mx-auto mb-4" />
           <p className="text-gray-700 text-lg font-semibold">No shop assignment found</p>
           <p className="text-gray-500 mt-2">Please contact administrator</p>
-          <Button onClick={handleLogout} className="mt-6 bg-blue-600 hover:bg-blue-700">
+          <Button onClick={handleLogoutClick} className="mt-6 bg-blue-600 hover:bg-blue-700 text-white">
             Logout
           </Button>
         </div>
@@ -1497,7 +1594,7 @@ function EmployeeContent() {
                 />
                 
                 <Button
-                  onClick={handleLogout}
+                  onClick={handleLogoutClick}
                   className="bg-white text-blue-600 hover:bg-blue-50 font-semibold px-4 py-2 text-sm sm:text-base"
                 >
                   <LogOut className="h-4 w-4 mr-2" />
@@ -1784,6 +1881,13 @@ function EmployeeContent() {
           </div>
         </div>
       )}
+
+      {/* Logout Confirmation Modal */}
+      <LogoutConfirmationModal
+        isOpen={showLogoutModal}
+        onClose={() => setShowLogoutModal(false)}
+        onConfirm={handleConfirmLogout}
+      />
     </div>
   );
 }

@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { supabaseServer } from '@/lib/supabaseServer'
+import { logActivity } from '@/lib/activity-logger'
 
 // 🔔 ENHANCED Notification Helper Function with Push Notifications
 async function createOrderNotification(notificationData: {
@@ -428,13 +429,23 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
+    // Get employee name for logging
+    const { data: employeeData } = await supabaseAdmin
+      .from('users')
+      .select('full_name')
+      .eq('id', user.id)
+      .single();
+
+    const employeeName = employeeData?.full_name || user.email || 'Employee';
+
     // Get order method and check if pickup order already has order_items
     const { data: order, error: orderError } = await supabaseAdmin
       .from('orders')
       .select(`
         *,
         order_items(id, status),
-        method:shop_methods(code)
+        method:shop_methods(code),
+        branch:shop_branches(name, shop_id)
       `)
       .eq('id', orderId)
       .single();
@@ -503,6 +514,20 @@ export async function POST(request: NextRequest) {
 
       console.log('✅ [POST] Pickup order weighted and moved to work queue:', orderItem.id);
 
+      // ✅ LOG ACTIVITY: Employee weighed pickup order
+      await logActivity({
+        actorName: employeeName,
+        actorType: 'employee',
+        action: 'order_weighted',
+        entityType: 'order',
+        entityId: orderId,
+        entityName: `Order #${orderId.substring(0, 8).toUpperCase()}`,
+        description: `${employeeName} weighed pickup order #${orderId.substring(0, 8).toUpperCase()}. Weight: ${kilo}kg, Total: ₱${subtotal.toFixed(2)}`,
+        severity: 'info',
+        branchId: order.branch_id,
+        shopId: order.branch?.shop_id
+      });
+
       // 🔔 CREATE NOTIFICATION WITH PUSH
       await createOrderNotification({
         userId: orderItem.order.customer_id,
@@ -561,9 +586,22 @@ export async function POST(request: NextRequest) {
 
       console.log('✅ [POST] Order moved to work queue:', orderItem.id);
 
-      // 🔔 CREATE NOTIFICATION WITH PUSH
+      // ✅ LOG ACTIVITY: Employee processed order
       const methodLabel = orderMethod === 'delivery' ? 'delivery' : 'dropoff';
-      
+      await logActivity({
+        actorName: employeeName,
+        actorType: 'employee',
+        action: 'order_processed',
+        entityType: 'order',
+        entityId: orderId,
+        entityName: `Order #${orderId.substring(0, 8).toUpperCase()}`,
+        description: `${employeeName} processed ${methodLabel} order #${orderId.substring(0, 8).toUpperCase()}. Weight: ${kilo}kg, Total: ₱${subtotal.toFixed(2)}`,
+        severity: 'info',
+        branchId: order.branch_id,
+        shopId: order.branch?.shop_id
+      });
+
+      // 🔔 CREATE NOTIFICATION WITH PUSH
       await createOrderNotification({
         userId: orderItem.order.customer_id,
         title: 'Order Confirmed! ✅',
@@ -617,6 +655,15 @@ export async function PATCH(request: NextRequest) {
       }, { status: 400 });
     }
 
+    // Get employee name for logging
+    const { data: employeeData } = await supabaseAdmin
+      .from('users')
+      .select('full_name')
+      .eq('id', user.id)
+      .single();
+
+    const employeeName = employeeData?.full_name || user.email || 'Employee';
+
     // Get order item details first
     const { data: orderItem, error: fetchError } = await supabaseAdmin
       .from('order_items')
@@ -624,7 +671,7 @@ export async function PATCH(request: NextRequest) {
         *,
         order:orders(
           *,
-          branch:shop_branches(shop_id),
+          branch:shop_branches(name, shop_id),
           method:shop_methods(code, label),
           service:shop_services(name),
           detergent:detergent_types(name),
@@ -652,11 +699,12 @@ export async function PATCH(request: NextRequest) {
 
     const orderMethod = orderItem.order.method?.code;
     const currentStatus = orderItem.status;
+    const orderId = orderItem.order.id;
     
     console.log('🚚 Order details:', {
       method: orderMethod,
       currentStatus: currentStatus,
-      orderId: orderItem.order.id,
+      orderId: orderId,
       customer_id: orderItem.order.customer_id
     });
 
@@ -730,6 +778,20 @@ export async function PATCH(request: NextRequest) {
     }
 
     console.log('✅ [PATCH] Order status updated successfully:', updatedItem.id);
+
+    // ✅ LOG ACTIVITY: Employee updated order status
+    await logActivity({
+      actorName: employeeName,
+      actorType: 'employee',
+      action: 'order_status_updated',
+      entityType: 'order',
+      entityId: orderId,
+      entityName: `Order #${orderId.substring(0, 8).toUpperCase()}`,
+      description: `${employeeName} updated order #${orderId.substring(0, 8).toUpperCase()} status from ${currentStatus} to ${nextStatus}`,
+      severity: 'info',
+      branchId: orderItem.order.branch_id,
+      shopId: orderItem.order.branch?.shop_id
+    });
 
     // 🔔 CREATE NOTIFICATIONS WITH PUSH BASED ON STATUS CHANGE AND ORDER METHOD
     if (nextStatus === 'ready_for_delivery') {
@@ -816,6 +878,20 @@ export async function PATCH(request: NextRequest) {
         }, { status: 500 });
       } else {
         console.log('✅ [PATCH] Order saved to order_history');
+        
+        // ✅ LOG ACTIVITY: Order completed
+        await logActivity({
+          actorName: employeeName,
+          actorType: 'employee',
+          action: 'order_completed',
+          entityType: 'order',
+          entityId: orderId,
+          entityName: `Order #${orderId.substring(0, 8).toUpperCase()}`,
+          description: `${employeeName} completed order #${orderId.substring(0, 8).toUpperCase()} (${orderMethod})`,
+          severity: 'info',
+          branchId: order.branch_id,
+          shopId: order.branch?.shop_id
+        });
         
         // 🔔 CREATE NOTIFICATION FOR ORDER COMPLETION WITH PUSH
         let completionBody = '';
@@ -952,6 +1028,16 @@ export async function PUT(request: NextRequest) {
       }, { status: 400 });
     }
 
+    // Get employee name for logging
+    const { data: employeeData } = await supabaseAdmin
+      .from('users')
+      .select('full_name')
+      .eq('id', user.id)
+      .single();
+
+    const employeeName = employeeData?.full_name || user.email || 'Employee';
+    const shopId = assignment.shop_id;
+
     // 🔄 UPDATED: Handle PICKUP orders differently - create order_item immediately
     let createdOrder = null;
     let orderItemData = null;
@@ -1045,9 +1131,23 @@ export async function PUT(request: NextRequest) {
       console.log('✅ [MANUAL ORDER] Order created:', order.id);
     }
 
+    // ✅ LOG ACTIVITY: Employee created manual order
+    await logActivity({
+      actorName: employeeName,
+      actorType: 'employee',
+      action: 'manual_order_created',
+      entityType: 'order',
+      entityId: createdOrder.id,
+      entityName: `Order #${createdOrder.id.substring(0, 8).toUpperCase()}`,
+      description: `${employeeName} created manual ${method} order for ${customerName} ${customerPhone ? `(${customerPhone})` : ''}`,
+      severity: 'info',
+      branchId: branchId,
+      shopId: shopId
+    });
+
     // ✅ FIXED: Now we can use createdOrder which is defined in both code paths
     if (createdOrder) {
-      // Log the manual order creation
+      // Log the manual order creation (keeping existing employee_actions table)
       await supabaseAdmin
         .from('employee_actions')
         .insert({
@@ -1055,7 +1155,7 @@ export async function PUT(request: NextRequest) {
           branch_id: branchId,
           action_type: 'manual_order_creation',
           description: `Created manual ${method} order for ${customerName}`,
-          order_id: createdOrder.id,  // ✅ Now using createdOrder instead of order
+          order_id: createdOrder.id,
           metadata: {
             customer_name: customerName,
             method: method,
@@ -1072,7 +1172,7 @@ export async function PUT(request: NextRequest) {
         success: true,
         message: 'Manual order created successfully',
         order: {
-          id: createdOrder.id,  // ✅ Now using createdOrder instead of order
+          id: createdOrder.id,
           customer_name: customerName,
           method: method,
           service_id: serviceId,

@@ -2,6 +2,7 @@
 import { supabaseServer } from '@/lib/supabaseServer'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { NextResponse } from 'next/server'
+import { logActivity } from '@/lib/activity-logger'
 
 // CORRECTED TypeScript interfaces
 interface Role {
@@ -29,7 +30,23 @@ export async function POST(request: Request) {
       password,
     })
     
-    if (authError) throw authError
+    if (authError) {
+      // ✅ LOG FAILED LOGIN ATTEMPT
+      await logActivity({
+        actorName: email,
+        actorType: 'customer', // Default, will be updated if we know the actual type
+        action: 'login_failed',
+        entityType: 'user',
+        entityId: email, // Using email as identifier since we don't have user ID yet
+        entityName: email,
+        description: `Failed login attempt for ${email}: ${authError.message}`,
+        severity: 'warning',
+        shopId: 'system' // Using 'system' for auth-related logs
+      });
+      
+      throw authError;
+    }
+    
     if (!authData.user) throw new Error("No user found")
 
     console.log("✅ STEP 2: User authenticated - ID:", authData.user.id)
@@ -61,6 +78,19 @@ export async function POST(request: Request) {
     }
 
     if (!roleData || roleData.length === 0) {
+      // ✅ LOG LOGIN WITH NO ROLE ASSIGNED
+      await logActivity({
+        actorName: authData.user.email || 'Unknown',
+        actorType: 'customer', // Default type
+        action: 'login_failed',
+        entityType: 'user',
+        entityId: authData.user.id,
+        entityName: authData.user.email || 'User',
+        description: `User ${authData.user.email || authData.user.id} logged in but has no role assigned`,
+        severity: 'warning',
+        shopId: 'system'
+      });
+      
       throw new Error("No role assigned. Please contact support.")
     }
 
@@ -75,7 +105,60 @@ export async function POST(request: Request) {
       throw new Error("Role name not found.")
     }
 
-    // 4. Return role for redirect
+    // 4. Get user details for logging
+    const { data: userDetails } = await supabaseAdmin
+      .from('users')
+      .select('full_name, phone')
+      .eq('id', authData.user.id)
+      .single();
+
+    const actorName = userDetails?.full_name || authData.user.email || 'User';
+    
+    // Map role to actor type
+    const roleToActorType: Record<string, 'customer' | 'employee' | 'driver' | 'system' | 'owner'> = {
+      'customer': 'customer',
+      'employee': 'employee',
+      'delivery': 'driver',
+      'owner': 'owner',
+      'superadmin': 'system'
+    };
+
+    const actorType = roleToActorType[userRole] || 'customer';
+
+    // 5. Get shop/branch assignment if applicable
+    let shopId = 'system';
+    let branchId: string | undefined = undefined;
+    
+    if (['employee', 'driver', 'owner'].includes(actorType)) {
+      // Get shop assignment for non-customer roles
+      const { data: assignment } = await supabaseAdmin
+        .from('shop_user_assignments')
+        .select('shop_id, branch_id')
+        .eq('user_id', authData.user.id)
+        .eq('is_active', true)
+        .maybeSingle();
+      
+      if (assignment) {
+        shopId = assignment.shop_id;
+        branchId = assignment.branch_id;
+      }
+    }
+
+    // ✅ LOG SUCCESSFUL LOGIN
+    await logActivity({
+      actorName,
+      actorType,
+      action: 'login_success',
+      entityType: 'user',
+      entityId: authData.user.id,
+      entityName: actorName,
+      description: `${actorName} (${userRole}) logged in successfully`,
+      severity: 'info',
+      branchId,
+      shopId
+    });
+
+    // 6. Return role for redirect
     const roleRoutes: { [key: string]: string } = {
       'superadmin': '/admin',
       'owner': '/owner',
@@ -88,11 +171,35 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ 
       success: true, 
-      redirectTo: redirectPath 
+      redirectTo: redirectPath,
+      user: {
+        id: authData.user.id,
+        email: authData.user.email,
+        role: userRole,
+        name: actorName
+      }
     })
 
   } catch (error: any) {
-    console.error("💥 Login error:", error)
+    console.error("💥 Login error:", error);
+    
+    // ✅ LOG GENERIC LOGIN ERROR
+    try {
+      await logActivity({
+        actorName: email || 'Unknown',
+        actorType: 'customer',
+        action: 'login_failed',
+        entityType: 'user',
+        entityId: email || 'unknown',
+        entityName: email || 'Unknown User',
+        description: `Login error for ${email || 'unknown user'}: ${error.message}`,
+        severity: 'error',
+        shopId: 'system'
+      });
+    } catch (logError) {
+      console.error("Failed to log login error:", logError);
+    }
+    
     return NextResponse.json(
       { error: error.message },
       { status: 400 }

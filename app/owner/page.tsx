@@ -41,6 +41,17 @@ interface Analytics {
   period: string;
 }
 
+interface ActivityLog {
+  id: string;
+  created_at: string;
+  action: string;
+  entity_type: string;
+  entity_name: string;
+  actor_name: string;
+  description: string;
+  severity: 'info' | 'warning' | 'error' | 'critical';
+}
+
 // Helper function to generate empty chart data based on time period
 const generateEmptyChartData = (period: string) => {
   switch (period) {
@@ -94,6 +105,11 @@ function DashboardContent() {
   const [shopName, setShopName] = useState<string | null>(null);
   const [isAuthorized, setIsAuthorized] = useState(false);
   const [timePeriod, setTimePeriod] = useState<'daily' | 'weekly' | 'monthly' | 'yearly'>('weekly');
+  const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logsPage, setLogsPage] = useState(1);
+  const [hasMoreLogs, setHasMoreLogs] = useState(false);
+  const logsPerPage = 10;
 
   // ==============================
   // 🔐 AUTHENTICATION CHECK FIRST
@@ -188,6 +204,41 @@ function DashboardContent() {
   }, [isAuthorized, selectedBranch, branchChangeTrigger, timePeriod]);
 
   // ==============================
+  // 📝 FETCH ACTIVITY LOGS
+  // ==============================
+  useEffect(() => {
+    if (!isAuthorized || !selectedBranch) return;
+
+    const fetchActivityLogs = async () => {
+      try {
+        setLogsLoading(true);
+        console.log("📝 Fetching activity logs for branch:", selectedBranch.id);
+
+        const response = await fetch(
+          `/api/owner/activity-logs?branch_id=${selectedBranch.id}&limit=${logsPerPage}&page=${logsPage}`
+        );
+        const data = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to fetch activity logs");
+        }
+        
+        console.log("📝 Activity logs loaded:", data.logs?.length || 0);
+        setActivityLogs(data.logs || []);
+        setHasMoreLogs(data.hasMore || false);
+        
+      } catch (error: any) {
+        console.error("Error fetching activity logs:", error);
+        // Don't show toast for logs failure - it's not critical
+      } finally {
+        setLogsLoading(false);
+      }
+    };
+
+    fetchActivityLogs();
+  }, [isAuthorized, selectedBranch, branchChangeTrigger, logsPage]);
+
+  // ==============================
   // 📈 GENERATE EMPTY CHART DATA WHEN NO ANALYTICS
   // ==============================
   const {
@@ -260,7 +311,64 @@ function DashboardContent() {
     );
   }
 
-  // Show dashboard with data (charts will show even with empty data)
+  // Format date for activity logs
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
+  // Get severity color
+  const getSeverityColor = (severity: string) => {
+    switch (severity) {
+      case 'info': return 'bg-blue-100 text-blue-800';
+      case 'warning': return 'bg-yellow-100 text-yellow-800';
+      case 'error': return 'bg-red-100 text-red-800';
+      case 'critical': return 'bg-red-200 text-red-900';
+      default: return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  // Get action label
+  const getActionLabel = (action: string) => {
+    const actions: Record<string, string> = {
+      'order_created': 'Order Created',
+      'order_status_changed': 'Status Updated',
+      'payment_successful': 'Payment Received',
+      'payment_failed': 'Payment Failed',
+      'delivery_assigned': 'Delivery Assigned',
+      'delivery_completed': 'Delivery Completed',
+      'customer_complaint': 'Customer Complaint',
+      'shop_settings_updated': 'Settings Updated',
+      'employee_action': 'Employee Action',
+      'login_success': 'Login Successful',
+      'login_failed': 'Login Failed',
+      'logout': 'User Logout',
+      'manual_order_created': 'Manual Order Created',
+      'order_processed': 'Order Processed',
+      'order_weighted': 'Order Weighed',
+      'order_status_updated': 'Order Status Updated',
+      'order_completed': 'Order Completed',
+    };
+    return actions[action] || action.replace(/_/g, ' ');
+  };
+
+  // Pagination handlers
+  const handleNextPage = () => {
+    setLogsPage(prev => prev + 1);
+  };
+
+  const handlePrevPage = () => {
+    setLogsPage(prev => Math.max(1, prev - 1));
+  };
+
+  // ==============================
+  // 🎨 RENDER DASHBOARD
+  // ==============================
   return (
     <>
       <Toaster position="top-right" richColors />
@@ -364,6 +472,114 @@ function DashboardContent() {
           </div>
         </TabsContent>
       </Tabs>
+
+      {/* 🔥 ACTIVITY LOGS TABLE - ADDED HERE 🔥 */}
+      <div className="mt-8">
+        <Card className="shadow-sm">
+          <CardHeader>
+            <CardTitle>Recent Activity</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {logsLoading ? (
+              <div className="text-center py-8">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+                <p className="mt-2 text-gray-500">Loading activity logs...</p>
+              </div>
+            ) : activityLogs.length === 0 ? (
+              <div className="text-center py-8 text-gray-500">
+                No recent activity found
+              </div>
+            ) : (
+              <>
+                <div className="overflow-x-auto mb-4">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead>
+                      <tr className="bg-gray-50">
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Time
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Action
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Actor
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Entity
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Severity
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Description
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {activityLogs.map((log) => (
+                        <tr key={log.id} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
+                            {formatDate(log.created_at)}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
+                            {getActionLabel(log.action)}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700">
+                            {log.actor_name || 'System'}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700">
+                            {log.entity_name || log.entity_type}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getSeverityColor(log.severity)}`}>
+                              {log.severity}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600">
+                            {log.description}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                
+                {/* Simple Pagination Controls */}
+                <div className="flex items-center justify-between border-t border-gray-200 pt-4">
+                  <div className="text-sm text-gray-500">
+                    Showing {activityLogs.length} activities
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={handlePrevPage}
+                      disabled={logsPage === 1}
+                      className={`px-3 py-1 text-sm rounded border ${
+                        logsPage === 1
+                          ? 'text-gray-400 border-gray-300 cursor-not-allowed'
+                          : 'text-gray-700 border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      Previous
+                    </button>
+                    <span className="text-sm text-gray-700">Page {logsPage}</span>
+                    <button
+                      onClick={handleNextPage}
+                      disabled={!hasMoreLogs}
+                      className={`px-3 py-1 text-sm rounded border ${
+                        !hasMoreLogs
+                          ? 'text-gray-400 border-gray-300 cursor-not-allowed'
+                          : 'text-gray-700 border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </>
   );
 }
