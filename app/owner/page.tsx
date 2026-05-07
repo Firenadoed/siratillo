@@ -13,6 +13,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/lib/ui/tabs";
 import { useRouter } from "next/navigation";
 import { Toaster, toast } from "sonner";
 import { useBranch } from "@/lib/branchcontext";
+import { Download, FileSpreadsheet, FileText } from "lucide-react";
 
 const COLORS = ["#0088FE", "#00C49F", "#FFBB28"];
 
@@ -56,13 +57,11 @@ interface ActivityLog {
 const generateEmptyChartData = (period: string) => {
   switch (period) {
     case 'daily':
-      // 24 hours
       return Array.from({ length: 24 }, (_, i) => ({
         name: `${i.toString().padStart(2, '0')}:00`,
         sales: 0
       }));
     case 'weekly':
-      // Last 7 days
       return Array.from({ length: 7 }, (_, i) => {
         const d = new Date();
         d.setDate(d.getDate() - 6 + i);
@@ -72,13 +71,11 @@ const generateEmptyChartData = (period: string) => {
         };
       });
     case 'monthly':
-      // 4 weeks
       return Array.from({ length: 4 }, (_, i) => ({
         name: `W${i + 1}`,
         sales: 0
       }));
     case 'yearly':
-      // 12 months
       return Array.from({ length: 12 }, (_, i) => {
         const d = new Date();
         d.setMonth(d.getMonth() - (11 - i));
@@ -110,6 +107,7 @@ function DashboardContent() {
   const [logsPage, setLogsPage] = useState(1);
   const [hasMoreLogs, setHasMoreLogs] = useState(false);
   const logsPerPage = 10;
+  const [exportLoading, setExportLoading] = useState(false);
 
   // ==============================
   // 🔐 AUTHENTICATION CHECK FIRST
@@ -184,7 +182,6 @@ function DashboardContent() {
 
         setOrders(parsedOrders);
         
-        // Set analytics data from API
         if (data.analytics) {
           setAnalytics(data.analytics);
           console.log("📈 Analytics loaded:", data.analytics);
@@ -229,7 +226,6 @@ function DashboardContent() {
         
       } catch (error: any) {
         console.error("Error fetching activity logs:", error);
-        // Don't show toast for logs failure - it's not critical
       } finally {
         setLogsLoading(false);
       }
@@ -250,7 +246,6 @@ function DashboardContent() {
     customerGrowthData,
   } = useMemo(() => {
     if (!analytics) {
-      // Generate empty chart data structures
       const emptyChartData = generateEmptyChartData(timePeriod);
       const emptyMethodDistribution = [
         { name: "Drop Off", value: 0 },
@@ -284,10 +279,166 @@ function DashboardContent() {
   }, [analytics, timePeriod]);
 
   // ==============================
+  // 📊 EXPORT FUNCTIONS - NO SYMBOLS
+  // ==============================
+  
+  const exportToCSV = () => {
+    try {
+      setExportLoading(true);
+      
+      const exportData = [
+        {
+          Metric: `Dashboard Report - ${selectedBranch?.name || 'All Branches'}`,
+          Value: '',
+          Period: timePeriod.charAt(0).toUpperCase() + timePeriod.slice(1)
+        },
+        { Metric: 'Generated On', Value: new Date().toLocaleString(), Period: '' },
+        { Metric: '', Value: '', Period: '' },
+        { Metric: 'SUMMARY METRICS', Value: '', Period: '' },
+        { Metric: `Total Sales (${timePeriod})`, Value: totalSales.toString(), Period: '' },
+        { Metric: `Total Orders (${timePeriod})`, Value: totalOrders.toString(), Period: '' },
+        { Metric: 'Unique Customers', Value: uniqueCustomers.toString(), Period: '' },
+        { Metric: '', Value: '', Period: '' },
+        { Metric: 'SALES OVERVIEW', Value: '', Period: '' },
+        ...chartData.map(item => ({ Metric: item.name, Value: item.sales.toString(), Period: 'Sales' })),
+        { Metric: '', Value: '', Period: '' },
+        { Metric: 'SERVICE DISTRIBUTION', Value: '', Period: '' },
+        ...methodDistribution.map(item => ({ Metric: item.name, Value: item.value.toString(), Period: 'Orders' })),
+        { Metric: '', Value: '', Period: '' },
+        { Metric: 'CUSTOMER GROWTH', Value: '', Period: '' },
+        ...customerGrowthData.map(item => ({ 
+          Metric: item.name, 
+          Value: `${item.new},${item.returning}`, 
+          Period: 'Customers' 
+        })),
+      ];
+      
+      const headers = ['Metric', 'Value', 'Period'];
+      const csvRows: string[] = [headers.join(',')];
+      
+      for (const row of exportData) {
+        const values = headers.map(header => {
+          let value = row[header as keyof typeof row] || '';
+          if (typeof value === 'string' && (value.includes(',') || value.includes('"'))) {
+            value = `"${value.replace(/"/g, '""')}"`;
+          }
+          return value;
+        });
+        csvRows.push(values.join(','));
+      }
+      
+      const csvString = csvRows.join('\n');
+      const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', `dashboard_report_${selectedBranch?.name}_${timePeriod}_${new Date().toISOString().split('T')[0]}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      
+      
+    } catch (error) {
+      console.error('Export error:', error);
+      toast.error('Failed to export report');
+    } finally {
+      setExportLoading(false);
+    }
+  };
+  
+  const exportOrdersToCSV = () => {
+    try {
+      setExportLoading(true);
+      
+      if (orders.length === 0) {
+        toast.warning('No orders to export');
+        return;
+      }
+      
+      const headers = ['Order ID', 'Customer Name', 'Service Type', 'Amount', 'Date', 'Status'];
+      const csvRows: string[] = [headers.join(',')];
+      
+      for (const order of orders) {
+        const values = [
+          `"${order.id}"`,
+          `"${order.customer_name.replace(/"/g, '""')}"`,
+          `"${order.method}"`,
+          `${order.amount}`, // Raw number without any symbol
+          `"${new Date(order.created_at).toLocaleString()}"`,
+          `"${order.status || 'Pending'}"`
+        ];
+        csvRows.push(values.join(','));
+      }
+      
+      const csvString = csvRows.join('\n');
+      const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', `orders_${selectedBranch?.name}_${new Date().toISOString().split('T')[0]}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      
+      toast.success(`${orders.length} orders exported as CSV`);
+    } catch (error) {
+      console.error('Export error:', error);
+      toast.error('Failed to export orders');
+    } finally {
+      setExportLoading(false);
+    }
+  };
+  
+  const exportActivityLogsToCSV = () => {
+    try {
+      setExportLoading(true);
+      
+      if (activityLogs.length === 0) {
+        toast.warning('No activity logs to export');
+        return;
+      }
+      
+      const headers = ['Date & Time', 'Action', 'Actor', 'Entity', 'Severity', 'Description'];
+      const csvRows: string[] = [headers.join(',')];
+      
+      for (const log of activityLogs) {
+        const values = [
+          `"${formatDate(log.created_at)}"`,
+          `"${getActionLabel(log.action)}"`,
+          `"${log.actor_name || 'System'}"`,
+          `"${log.entity_name || log.entity_type}"`,
+          `"${log.severity}"`,
+          `"${log.description.replace(/"/g, '""')}"`
+        ];
+        csvRows.push(values.join(','));
+      }
+      
+      const csvString = csvRows.join('\n');
+      const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', `activity_logs_${selectedBranch?.name}_${new Date().toISOString().split('T')[0]}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      
+      toast.success(`${activityLogs.length} activity logs exported as CSV`);
+    } catch (error) {
+      console.error('Export error:', error);
+      toast.error('Failed to export activity logs');
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
+  // ==============================
   // 🎯 RENDER LOGIC
   // ==============================
   
-  // Show loading while checking auth OR fetching data
   if (loading || !isAuthorized) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -301,7 +452,6 @@ function DashboardContent() {
     );
   }
 
-  // Show branch selection prompt if no branch selected
   if (!selectedBranch) {
     return (
       <div className="text-center py-12">
@@ -311,7 +461,6 @@ function DashboardContent() {
     );
   }
 
-  // Format date for activity logs
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleDateString('en-US', {
@@ -322,7 +471,6 @@ function DashboardContent() {
     });
   };
 
-  // Get severity color
   const getSeverityColor = (severity: string) => {
     switch (severity) {
       case 'info': return 'bg-blue-100 text-blue-800';
@@ -333,7 +481,6 @@ function DashboardContent() {
     }
   };
 
-  // Get action label
   const getActionLabel = (action: string) => {
     const actions: Record<string, string> = {
       'order_created': 'Order Created',
@@ -357,7 +504,6 @@ function DashboardContent() {
     return actions[action] || action.replace(/_/g, ' ');
   };
 
-  // Pagination handlers
   const handleNextPage = () => {
     setLogsPage(prev => prev + 1);
   };
@@ -366,17 +512,42 @@ function DashboardContent() {
     setLogsPage(prev => Math.max(1, prev - 1));
   };
 
-  // ==============================
-  // 🎨 RENDER DASHBOARD
-  // ==============================
   return (
     <>
       <Toaster position="top-right" richColors />
-      <h1 className="text-xl sm:text-2xl font-bold mb-6 text-gray-800">
-        {shopName ? `${shopName} — ` : ""}Analytics
-      </h1>
+      <div className="flex flex-wrap justify-between items-center mb-6">
+        <h1 className="text-xl sm:text-2xl font-bold text-gray-800">
+          {shopName ? `${shopName} — ` : ""}Analytics
+        </h1>
+        
+        <div className="flex gap-2 mt-2 sm:mt-0">
+          <button
+            onClick={exportToCSV}
+            disabled={exportLoading}
+            className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors disabled:opacity-50 text-sm sm:text-base"
+          >
+            <FileText className="w-4 h-4" />
+            {exportLoading ? 'Exporting...' : 'Export Report'}
+          </button>
+          <button
+            onClick={exportOrdersToCSV}
+            disabled={exportLoading || orders.length === 0}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50 text-sm sm:text-base"
+          >
+            <Download className="w-4 h-4" />
+            Export Orders
+          </button>
+          <button
+            onClick={exportActivityLogsToCSV}
+            disabled={exportLoading || activityLogs.length === 0}
+            className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors disabled:opacity-50 text-sm sm:text-base"
+          >
+            <FileSpreadsheet className="w-4 h-4" />
+            Export Logs
+          </button>
+        </div>
+      </div>
 
-      {/* Branch Info */}
       <div className="mb-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
         <p className="text-blue-700 font-medium">
           Viewing data for: <span className="font-bold">{selectedBranch.name}</span>
@@ -389,7 +560,6 @@ function DashboardContent() {
         )}
       </div>
 
-      {/* Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6 mb-6">
         <Card className="bg-green-100">
           <CardHeader>
@@ -423,37 +593,12 @@ function DashboardContent() {
         </Card>
       </div>
 
-      {/* Charts with Time Period Tabs */}
-      <Tabs value={timePeriod} className="w-full">
+      <Tabs value={timePeriod} onValueChange={(value) => setTimePeriod(value as any)} className="w-full">
         <TabsList className="flex flex-wrap justify-center gap-2 mb-4">
-          <TabsTrigger 
-            value="daily"
-            onClick={() => setTimePeriod('daily')}
-            className={timePeriod === 'daily' ? 'bg-blue-500 text-black' : ''}
-          >
-            Daily
-          </TabsTrigger>
-          <TabsTrigger 
-            value="weekly"
-            onClick={() => setTimePeriod('weekly')}
-            className={timePeriod === 'weekly' ? 'bg-blue-500 text-black' : ''}
-          >
-            Weekly
-          </TabsTrigger>
-          <TabsTrigger 
-            value="monthly"
-            onClick={() => setTimePeriod('monthly')}
-            className={timePeriod === 'monthly' ? 'bg-blue-500 text-black' : ''}
-          >
-            Monthly
-          </TabsTrigger>
-          <TabsTrigger 
-            value="yearly"
-            onClick={() => setTimePeriod('yearly')}
-            className={timePeriod === 'yearly' ? 'bg-blue-500 text-black' : ''}
-          >
-            Yearly
-          </TabsTrigger>
+          <TabsTrigger value="daily">Daily</TabsTrigger>
+          <TabsTrigger value="weekly">Weekly</TabsTrigger>
+          <TabsTrigger value="monthly">Monthly</TabsTrigger>
+          <TabsTrigger value="yearly">Yearly</TabsTrigger>
         </TabsList>
 
         <TabsContent value={timePeriod}>
@@ -473,7 +618,42 @@ function DashboardContent() {
         </TabsContent>
       </Tabs>
 
-      {/* 🔥 ACTIVITY LOGS TABLE - ADDED HERE 🔥 */}
+      {orders.length > 0 && (
+        <div className="mt-8">
+          <Card className="shadow-sm">
+            <CardHeader>
+              <CardTitle>Recent Orders</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto max-h-96">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50 sticky top-0">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Order ID</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Customer</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Service</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Amount</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {orders.slice(0, 10).map((order) => (
+                      <tr key={order.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 text-sm text-gray-900">#{order.id.slice(-6)}</td>
+                        <td className="px-4 py-3 text-sm text-gray-700">{order.customer_name}</td>
+                        <td className="px-4 py-3 text-sm text-gray-700">{order.method}</td>
+                        <td className="px-4 py-3 text-sm font-medium text-gray-900">₱{order.amount.toLocaleString()}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500">{new Date(order.created_at).toLocaleDateString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       <div className="mt-8">
         <Card className="shadow-sm">
           <CardHeader>
@@ -495,56 +675,33 @@ function DashboardContent() {
                   <table className="min-w-full divide-y divide-gray-200">
                     <thead>
                       <tr className="bg-gray-50">
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Time
-                        </th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Action
-                        </th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Actor
-                        </th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Entity
-                        </th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Severity
-                        </th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Description
-                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Time</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Action</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actor</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Entity</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Severity</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
                       {activityLogs.map((log) => (
                         <tr key={log.id} className="hover:bg-gray-50 transition-colors">
-                          <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
-                            {formatDate(log.created_at)}
-                          </td>
-                          <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
-                            {getActionLabel(log.action)}
-                          </td>
-                          <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700">
-                            {log.actor_name || 'System'}
-                          </td>
-                          <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700">
-                            {log.entity_name || log.entity_type}
-                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">{formatDate(log.created_at)}</td>
+                          <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">{getActionLabel(log.action)}</td>
+                          <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700">{log.actor_name || 'System'}</td>
+                          <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700">{log.entity_name || log.entity_type}</td>
                           <td className="px-4 py-3 whitespace-nowrap">
                             <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getSeverityColor(log.severity)}`}>
                               {log.severity}
                             </span>
                           </td>
-                          <td className="px-4 py-3 text-sm text-gray-600">
-                            {log.description}
-                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600">{log.description}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
                 
-                {/* Simple Pagination Controls */}
                 <div className="flex items-center justify-between border-t border-gray-200 pt-4">
                   <div className="text-sm text-gray-500">
                     Showing {activityLogs.length} activities
@@ -584,7 +741,6 @@ function DashboardContent() {
   );
 }
 
-// --- Reusable Chart Components ---
 function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <Card className="shadow-sm hover:shadow-md transition">
@@ -601,9 +757,7 @@ function LineChartComp({ data, isEmpty }: { data: { name: string; sales: number 
         <CartesianGrid strokeDasharray="3 3" />
         <XAxis dataKey="name" />
         <YAxis />
-        <Tooltip 
-          formatter={(value) => [`₱${Number(value).toLocaleString()}`, 'Sales']}
-        />
+        <Tooltip formatter={(value) => [`₱${Number(value).toLocaleString()}`, 'Sales']} />
         <Line 
           type="monotone" 
           dataKey="sales" 
@@ -611,48 +765,14 @@ function LineChartComp({ data, isEmpty }: { data: { name: string; sales: number 
           strokeWidth={2} 
           dot={{ fill: '#8884d8', strokeWidth: 2, r: 4 }}
           activeDot={{ r: 6, stroke: '#8884d8', strokeWidth: 2 }}
-          strokeDasharray={isEmpty ? "5 5" : "0"} // Dashed line when empty
+          strokeDasharray={isEmpty ? "5 5" : "0"}
         />
-        {isEmpty && (
-          <text x="50%" y="50%" textAnchor="middle" dominantBaseline="middle" fill="#666">
-            No sales data
-          </text>
-        )}
       </LineChart>
     </ResponsiveContainer>
   );
 }
 
 function PieChartComp({ data, isEmpty }: { data: { name: string; value: number }[]; isEmpty?: boolean }) {
-  const renderCustomizedLabel = ({
-    cx,
-    cy,
-    midAngle,
-    innerRadius,
-    outerRadius,
-    percent,
-  }: any) => {
-    // Don't show labels when all values are zero
-    if (isEmpty) return null;
-    
-    const RADIAN = Math.PI / 180;
-    const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
-    const x = cx + radius * Math.cos(-midAngle * RADIAN);
-    const y = cy + radius * Math.sin(-midAngle * RADIAN);
-
-    return (
-      <text
-        x={x}
-        y={y}
-        fill="white"
-        textAnchor={x > cx ? 'start' : 'end'}
-        dominantBaseline="central"
-      >
-        {`${(percent * 100).toFixed(0)}%`}
-      </text>
-    );
-  };
-
   return (
     <ResponsiveContainer width="100%" height="100%">
       <PieChart>
@@ -660,24 +780,14 @@ function PieChartComp({ data, isEmpty }: { data: { name: string; value: number }
           data={data} 
           dataKey="value" 
           nameKey="name"
-          outerRadius={80} 
-          label={renderCustomizedLabel}
+          outerRadius={80}
           labelLine={false}
         >
           {data.map((entry, i) => (
-            <Cell 
-              key={i} 
-              fill={isEmpty ? "#e5e7eb" : COLORS[i % COLORS.length]} // Gray when empty
-              opacity={isEmpty ? 0.5 : 1}
-            />
+            <Cell key={i} fill={isEmpty ? "#e5e7eb" : COLORS[i % COLORS.length]} opacity={isEmpty ? 0.5 : 1} />
           ))}
         </Pie>
         <Tooltip formatter={(value) => [value, 'Orders']} />
-        {isEmpty && (
-          <text x="50%" y="50%" textAnchor="middle" dominantBaseline="middle" fill="#666">
-            No orders
-          </text>
-        )}
       </PieChart>
     </ResponsiveContainer>
   );
@@ -691,29 +801,13 @@ function BarChartComp({ data, isEmpty }: { data: { name: string; new: number; re
         <XAxis dataKey="name" />
         <YAxis />
         <Tooltip />
-        <Bar 
-          dataKey="new" 
-          name="New Customers" 
-          fill={isEmpty ? "#9ca3af" : "#82ca9d"} 
-          opacity={isEmpty ? 0.5 : 1}
-        />
-        <Bar 
-          dataKey="returning" 
-          name="Returning Customers" 
-          fill={isEmpty ? "#6b7280" : "#8884d8"} 
-          opacity={isEmpty ? 0.5 : 1}
-        />
-        {isEmpty && (
-          <text x="50%" y="50%" textAnchor="middle" dominantBaseline="middle" fill="#666">
-            No customer data
-          </text>
-        )}
+        <Bar dataKey="new" name="New Customers" fill={isEmpty ? "#9ca3af" : "#82ca9d"} opacity={isEmpty ? 0.5 : 1} />
+        <Bar dataKey="returning" name="Returning Customers" fill={isEmpty ? "#6b7280" : "#8884d8"} opacity={isEmpty ? 0.5 : 1} />
       </BarChart>
     </ResponsiveContainer>
   );
 }
 
-// 👈 MAIN EXPORT - WRAP DashboardContent with DashboardLayout
 export default function Dashboard() {
   return (
     <DashboardLayout>
