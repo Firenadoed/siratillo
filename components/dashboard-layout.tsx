@@ -16,7 +16,9 @@ import {
   Building,
   Settings,
   QrCode,
-  AlertTriangle
+  AlertTriangle,
+  Flag,
+  Bell
 } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useUser } from "@supabase/auth-helpers-react"
@@ -41,6 +43,7 @@ interface OperatingHours {
   is_closed: boolean
 }
 
+// Sidebar links - REMOVED Reports from here
 const sidebarLinks = [
   { name: "Dashboard", href: "/owner", icon: Home },
   { name: "Services", href: "/owner/services", icon: Shirt },
@@ -62,13 +65,11 @@ function LogoutConfirmationModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      {/* Backdrop */}
       <div 
         className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300"
         onClick={onClose}
       />
       
-      {/* Modal */}
       <motion.div
         initial={{ opacity: 0, scale: 0.95, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -76,7 +77,6 @@ function LogoutConfirmationModal({
         transition={{ type: "spring", damping: 25, stiffness: 300 }}
         className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
       >
-        {/* Header */}
         <div className="p-6 border-b border-gray-100">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center">
@@ -91,14 +91,12 @@ function LogoutConfirmationModal({
           </div>
         </div>
 
-        {/* Body */}
         <div className="p-6">
           <p className="text-gray-700">
             You will be redirected to the login page and will need to sign in again to access your dashboard.
           </p>
         </div>
 
-        {/* Footer */}
         <div className="p-6 bg-gray-50 flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-3">
           <button
             onClick={onClose}
@@ -135,60 +133,51 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [branchChangeTrigger, setBranchChangeTrigger] = useState(0)
   const [isOpenNow, setIsOpenNow] = useState(false)
   const [showLogoutModal, setShowLogoutModal] = useState(false)
+  const [pendingReportsCount, setPendingReportsCount] = useState(0)
+
+  // Fetch pending reports count
+  const fetchPendingReportsCount = async () => {
+    if (!shop) return;
+    
+    try {
+      const response = await fetch(`/api/owner/reports/count?shop_id=${shop.id}`)
+      const data = await response.json()
+      if (response.ok) {
+        setPendingReportsCount(data.count || 0)
+      }
+    } catch (error) {
+      console.error("Error fetching reports count:", error)
+    }
+  }
+
+  // Fetch reports count every 30 seconds
+  useEffect(() => {
+    if (isAuthorized && shop) {
+      fetchPendingReportsCount()
+      const interval = setInterval(fetchPendingReportsCount, 30000)
+      return () => clearInterval(interval)
+    }
+  }, [isAuthorized, shop])
 
   // ==============================
   // 🕒 CHECK IF BRANCH IS OPEN NOW
   // ==============================
   const checkIfOpen = (branchId: string, hours: OperatingHours[]): boolean => {
     const now = new Date();
-    const currentDay = now.getDay(); // 0 = Sunday, 1 = Monday, etc.
-    const currentTime = now.toTimeString().slice(0, 8); // "HH:MM:SS" format
-    
-    console.log('🕒 Checking if open for branch:', branchId);
-    console.log('📅 Current day:', currentDay, '(0=Sunday)');
-    console.log('⏰ Current time:', currentTime);
-    console.log('📋 All operating hours for this branch:', 
-      hours.filter(h => h.branch_id === branchId)
-    );
+    const currentDay = now.getDay();
+    const currentTime = now.toTimeString().slice(0, 8);
     
     const todayHours = hours.find(h => 
       h.branch_id === branchId && h.day_of_week === currentDay
     );
     
-    if (!todayHours) {
-      console.log('❌ No operating hours found for today');
-      console.log('Available days for this branch:', 
-        hours.filter(h => h.branch_id === branchId).map(h => ({
-          day: h.day_of_week,
-          open: h.open_time,
-          close: h.close_time,
-          closed: h.is_closed
-        }))
-      );
-      return false;
-    }
+    if (!todayHours || todayHours.is_closed) return false;
     
-    if (todayHours.is_closed) {
-      console.log('❌ Marked as closed for today');
-      return false;
-    }
+    const openTimeStr = todayHours.open_time?.slice(0, 5) || '00:00';
+    const closeTimeStr = todayHours.close_time?.slice(0, 5) || '23:59';
+    const currentTimeStr = currentTime.slice(0, 5);
     
-    // Convert TIME fields to comparable strings
-    // PostgreSQL TIME format is "HH:MM:SS" or "HH:MM:SS.sss"
-    const openTimeStr = todayHours.open_time?.slice(0, 5) || '00:00'; // Take only HH:MM
-    const closeTimeStr = todayHours.close_time?.slice(0, 5) || '23:59'; // Take only HH:MM
-    const currentTimeStr = currentTime.slice(0, 5); // Take only HH:MM
-    
-    const isOpen = currentTimeStr >= openTimeStr && currentTimeStr <= closeTimeStr;
-    
-    console.log('✅ Hours found:', {
-      openTime: openTimeStr,
-      closeTime: closeTimeStr,
-      currentTime: currentTimeStr,
-      isOpen
-    });
-    
-    return isOpen;
+    return currentTimeStr >= openTimeStr && currentTimeStr <= closeTimeStr;
   }
 
   // ==============================
@@ -249,11 +238,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           setBranches(branches || [])
           setOperatingHours(operatingHours || [])
           
-          // Set first branch as selected by default
           if (branches && branches.length > 0) {
             const firstBranch = branches[0]
             setSelectedBranch(firstBranch)
-            // Check if branch is open
             setIsOpenNow(checkIfOpen(firstBranch.id, operatingHours || []))
           }
         } else {
@@ -278,11 +265,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     setSelectedBranch(branch)
     setBranchesDropdownOpen(false)
     setBranchChangeTrigger(prev => prev + 1)
-    
-    // Check if selected branch is open
     setIsOpenNow(checkIfOpen(branch.id, operatingHours))
-    
-    console.log(`📍 Branch switched to: ${branch.name}, Open: ${isOpenNow}`)
+    console.log(`📍 Branch switched to: ${branch.name}`)
   }
 
   // ==============================
@@ -295,12 +279,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       setIsOpenNow(checkIfOpen(selectedBranch.id, operatingHours))
     };
 
-    // Update immediately
     updateOpenStatus();
-
-    // Update every minute
     const interval = setInterval(updateOpenStatus, 60000);
-
     return () => clearInterval(interval);
   }, [selectedBranch, operatingHours])
 
@@ -314,7 +294,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         const { branches } = await response.json()
         setBranches(branches || [])
         
-        // If the currently selected branch still exists, keep it selected
         if (selectedBranch) {
           const updatedSelectedBranch = branches.find((b: Branch) => b.id === selectedBranch.id)
           setSelectedBranch(updatedSelectedBranch || branches[0] || null)
@@ -354,12 +333,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
       const { branch: updatedBranch } = await response.json()
       
-      // Update in local state
       setBranches(prev => 
         prev.map(branch => branch.id === branchId ? { ...branch, ...updatedBranch } : branch)
       )
       
-      // If the updated branch is currently selected, update it too
       if (selectedBranch?.id === branchId) {
         setSelectedBranch(prev => prev ? { ...prev, ...updatedBranch } : null)
       }
@@ -382,10 +359,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         throw new Error(error || 'Failed to delete branch')
       }
 
-      // Remove from local state
       setBranches(prev => prev.filter(branch => branch.id !== branchId))
       
-      // If the deleted branch was selected, select another one
       if (selectedBranch?.id === branchId) {
         const remainingBranches = branches.filter(branch => branch.id !== branchId)
         setSelectedBranch(remainingBranches[0] || null)
@@ -421,7 +396,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     handleLogout()
   }
 
-  // Handle Escape key to close modal
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && showLogoutModal) {
@@ -433,7 +407,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     return () => window.removeEventListener('keydown', handleEscape)
   }, [showLogoutModal])
 
-  // Show loading while checking auth OR fetching data
   if (loading || !isAuthorized) {
     return (
       <div className="flex h-screen bg-gray-50 items-center justify-center">
@@ -464,7 +437,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <div className="flex h-screen bg-gray-50">
           <Toaster position="top-right" richColors />
           
-          {/* ====== MOBILE NAVBAR ====== */}
+          {/* Mobile Navbar */}
           <div className="lg:hidden fixed top-0 left-0 right-0 z-40 bg-gradient-to-r from-blue-800 to-blue-700 text-white flex items-center justify-between px-4 py-3 shadow-lg">
             <button
               onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -477,7 +450,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             <div className="w-6" />
           </div>
 
-          {/* ====== SIDEBAR ====== */}
+          {/* Sidebar */}
           <aside
             className={cn(
               "fixed lg:static top-0 left-0 h-full w-80 bg-gradient-to-b from-blue-900 via-blue-800 to-blue-700 text-white flex flex-col justify-between shadow-xl z-50 transform transition-transform duration-300",
@@ -488,7 +461,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               {/* Shop Header Section */}
               <div className="p-6 border-b border-blue-600">
                 <div className="flex items-center gap-4 mb-4">
-                  {/* Shop Logo - Uses shop.logo_url */}
                   <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white shadow-lg overflow-hidden">
                     {shop?.logo_url ? (
                       <img 
@@ -535,7 +507,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     )} />
                   </button>
 
-                  {/* Branch Dropdown */}
                   {branchesDropdownOpen && branches.length > 0 && (
                     <div className="absolute top-full left-0 right-0 mt-2 bg-blue-800 border border-blue-600 rounded-xl shadow-2xl z-50 max-h-60 overflow-y-auto">
                       <div className="p-2">
@@ -573,7 +544,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   )}
                 </div>
 
-                {/* Status Badge - Dynamic based on operating hours */}
+                {/* Status Badge with Report Button */}
                 <div className="flex items-center justify-between mt-4">
                   <div className="flex items-center gap-2">
                     <div className={cn(
@@ -587,9 +558,20 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                       {isOpenNow ? "Open Now" : "Closed"}
                     </span>
                   </div>
-                  <span className="text-blue-300 text-xs">
-                    {branches.length} branch{branches.length !== 1 ? 'es' : ''}
-                  </span>
+                  
+                  {/* Reports Button with Badge */}
+                  <Link 
+                    href="/owner/reports"
+                    className="relative flex items-center gap-1 px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 rounded-lg transition-all duration-200 border border-red-500/30"
+                  >
+                    <Flag className="w-4 h-4 text-red-300" />
+                    <span className="text-xs font-medium text-red-300">Reports</span>
+                    {pendingReportsCount > 0 && (
+                      <span className="absolute -top-2 -right-2 flex items-center justify-center w-5 h-5 bg-red-500 text-white text-xs font-bold rounded-full shadow-lg animate-pulse">
+                        {pendingReportsCount > 9 ? '9+' : pendingReportsCount}
+                      </span>
+                    )}
+                  </Link>
                 </div>
               </div>
 
@@ -669,7 +651,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </div>
           </aside>
 
-          {/* ====== OVERLAY (MOBILE ONLY) ====== */}
+          {/* Mobile Overlay */}
           {sidebarOpen && (
             <div
               onClick={() => setSidebarOpen(false)}
@@ -677,7 +659,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             />
           )}
 
-          {/* ====== MAIN CONTENT ====== */}
+          {/* Main Content */}
           <main className="flex-1 p-6 lg:p-8 mt-14 lg:mt-0 overflow-y-auto transition-all bg-gradient-to-br from-blue-50 to-blue-100/30">
             <div className="max-w-7xl mx-auto">
               {/* Branch Context Bar */}
